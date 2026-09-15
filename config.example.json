@@ -1,0 +1,19 @@
+{
+  "telegram": {
+    "bot_token": "YOUR_TELEGRAM_BOT_TOKEN_FROM_BOTFATHER",
+    "allowed_user_ids": [
+      123456789
+    ],
+    "stream_edit_interval_ms": 1200
+  },
+  "agy": {
+    "binary_path": "agy",
+    "default_workspace": "auto",
+    "default_model": "",
+    "default_effort": "",
+    "permission_mode": "auto"
+  },
+  "storage": {
+    "session_file": "./sessions.json"
+  }
+}

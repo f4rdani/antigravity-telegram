@@ -1,0 +1,16 @@
+[Unit]
+Description=Antigravity CLI Telegram Remote Bridge Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/agy-tele
+ExecStart=/opt/agy-tele/agy-tele -config /opt/agy-tele/config.json
+Restart=always
+RestartSec=5s
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

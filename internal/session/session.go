@@ -1,0 +1,33 @@
+package session
+
+import (
+	"sync"
+	"time"
+)
+
+type ConversationEntry struct {
+	ID        string    `json:"id"`
+	Title     string    `json:"title"`
+	CreatedAt time.Time `json:"created_at"`
+	CWD       string    `json:"cwd"`
+}
+
+type UserSession struct {
+	UserID               int64               `json:"user_id"`
+	ChatID               int64               `json:"chat_id"`
+	ActiveConversationID string              `json:"active_conversation_id"`
+	CWD                  string              `json:"cwd"`
+	PermissionMode       string              `json:"permission_mode"` // "auto" or "ask"
+	ActiveModel          string              `json:"active_model"`
+	ActiveEffort         string              `json:"active_effort"`
+	LastActiveTime       time.Time           `json:"last_active_time"`
+	RecentConversations  []ConversationEntry `json:"recent_conversations"`
+}
+
+type SessionManager struct {
+	mu          sync.RWMutex
+	filePath    string
+	sessions    map[int64]*UserSession
+	defaultRoot string
+	defaultPerm string
+}

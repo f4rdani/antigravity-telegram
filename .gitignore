@@ -1,0 +1,12 @@
+# Binaries
+bin/
+*.exe
+
+# Configuration with secrets
+config.json
+
+# Session database
+sessions.json
+
+# Logs
+*.log
