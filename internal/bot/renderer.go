@@ -87,23 +87,32 @@ func FormatStatus(sess *session.UserSession, isRunning bool) string {
 	)
 }
 
-func FormatSessions(recent []session.ConversationEntry, activeID string) string {
-	if len(recent) == 0 {
-		return "Belum ada riwayat sesi percakapan. Gunakan <code>/new</code> atau langsung kirim pesan untuk memulai."
+func FormatSessions(convs []session.AvailableConversation, activeID string) string {
+	if len(convs) == 0 {
+		return "📂 Belum ada riwayat sesi percakapan. Mulai percakapan baru dengan mengirim pesan langsung."
 	}
 
 	var sb strings.Builder
-	sb.WriteString("📋 <b>Riwayat Sesi Percakapan:</b>\n\n")
+	sb.WriteString("📋 <b>Daftar Riwayat Percakapan:</b>\n\n")
 
-	for i, c := range recent {
+	for i, c := range convs {
 		tag := ""
 		if c.ID == activeID {
-			tag = " 🌟 [AKTIF]"
+			tag = " 🌟 <i>(Aktif)</i>"
 		}
-		sb.WriteString(fmt.Sprintf("%d. <code>%s</code>%s\n", i+1, c.ID, tag))
-		sb.WriteString(fmt.Sprintf("   📁 CWD: <code>%s</code>\n", c.CWD))
-		sb.WriteString(fmt.Sprintf("   🕒 Waktu: %s\n", c.CreatedAt.Format("15:04 02/01/06")))
-		sb.WriteString(fmt.Sprintf("   👉 Switch: <code>/switch %s</code>\n\n", c.ID))
+		timeInfo := ""
+		if c.TimeLabel != "" {
+			timeInfo = fmt.Sprintf(" • <i>%s</i>", c.TimeLabel)
+		}
+		shortID := c.ID
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+		sb.WriteString(fmt.Sprintf("<b>%d. %s</b>%s%s\n", i+1, EscapeHTML(c.Title), timeInfo, tag))
+		if c.Workspace != "" {
+			sb.WriteString(fmt.Sprintf("   📁 <code>%s</code>\n", c.Workspace))
+		}
+		sb.WriteString(fmt.Sprintf("   👉 Resume: <code>/resume %s</code>\n\n", shortID))
 	}
 
 	return sb.String()

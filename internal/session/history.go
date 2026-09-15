@@ -1,12 +1,16 @@
 package session
 
 import (
-	"bufio"
+	"database/sql"
 	"encoding/json"
+	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type HistoryEntry struct {
@@ -22,15 +26,77 @@ type AvailableConversation struct {
 	Title     string
 	Workspace string
 	Time      time.Time
+	TimeLabel string
 }
 
 func (sm *SessionManager) GetAvailableConversations(userID int64) []AvailableConversation {
-	sess := sm.GetSession(userID, 0)
-
 	var result []AvailableConversation
 	seen := make(map[string]bool)
 
-	// 1. From active bot session
+	homeDir, err := os.UserHomeDir()
+	if err == nil {
+		// 1. Primary Source: conversation_summaries.db from Antigravity CLI
+		dbPath := filepath.Join(homeDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
+		if _, err := os.Stat(dbPath); err == nil {
+			db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+			if err == nil {
+				defer db.Close()
+
+				query := `SELECT conversation_id, preview, workspace_uris, last_modified_time 
+				          FROM conversation_summaries 
+				          ORDER BY last_modified_time DESC LIMIT 10;`
+				rows, err := db.Query(query)
+				if err == nil {
+					defer rows.Close()
+					for rows.Next() {
+						var id, preview, wsJSON, modTimeStr string
+						if err := rows.Scan(&id, &preview, &wsJSON, &modTimeStr); err == nil {
+							if id != "" && !seen[id] {
+								seen[id] = true
+
+								// Parse title
+								title := strings.TrimSpace(preview)
+								if title == "" {
+									title = "Percakapan " + id[:8]
+								}
+								runes := []rune(title)
+								if len(runes) > 32 {
+									title = string(runes[:32]) + "..."
+								}
+
+								// Parse workspace URI
+								ws := cleanWorkspaceURI(wsJSON)
+
+								// Parse time
+								modTime, err := time.Parse(time.RFC3339Nano, modTimeStr)
+								if err != nil {
+									modTime, _ = time.Parse("2006-01-02 15:04:05.999999999-07:00", modTimeStr)
+								}
+								if modTime.IsZero() {
+									modTime = time.Now()
+								}
+
+								result = append(result, AvailableConversation{
+									ID:        id,
+									Title:     title,
+									Workspace: ws,
+									Time:      modTime,
+									TimeLabel: formatFriendlyTime(modTime),
+								})
+
+								if len(result) >= 7 {
+									break
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// 2. Secondary Source: bot session store if not already added
+	sess := sm.GetSession(userID, 0)
 	for _, c := range sess.RecentConversations {
 		if c.ID != "" && !seen[c.ID] {
 			seen[c.ID] = true
@@ -39,59 +105,52 @@ func (sm *SessionManager) GetAvailableConversations(userID int64) []AvailableCon
 				Title:     c.Title,
 				Workspace: c.CWD,
 				Time:      c.CreatedAt,
+				TimeLabel: formatFriendlyTime(c.CreatedAt),
 			})
-		}
-	}
-
-	// 2. From agy history.jsonl (works on both Linux ~/.gemini/ and Windows C:\Users\~/.gemini/)
-	homeDir, err := os.UserHomeDir()
-	if err == nil {
-		historyPath := filepath.Join(homeDir, ".gemini", "antigravity-cli", "history.jsonl")
-		if f, err := os.Open(historyPath); err == nil {
-			defer f.Close()
-
-			var lines []string
-			scanner := bufio.NewScanner(f)
-			for scanner.Scan() {
-				lines = append(lines, scanner.Text())
-			}
-
-			// Traverse lines in reverse (newest first)
-			for i := len(lines) - 1; i >= 0; i-- {
-				var entry HistoryEntry
-				if err := json.Unmarshal([]byte(lines[i]), &entry); err == nil {
-					if entry.ConversationID != "" && !seen[entry.ConversationID] {
-						seen[entry.ConversationID] = true
-
-						title := strings.TrimSpace(entry.Display)
-						if strings.HasPrefix(title, "/") || title == "" {
-							title = "Sesi " + entry.ConversationID[:8]
-						}
-						runes := []rune(title)
-						if len(runes) > 30 {
-							title = string(runes[:30]) + "..."
-						}
-
-						t := time.UnixMilli(entry.Timestamp)
-						if entry.Timestamp <= 0 {
-							t = time.Now()
-						}
-
-						result = append(result, AvailableConversation{
-							ID:        entry.ConversationID,
-							Title:     title,
-							Workspace: entry.Workspace,
-							Time:      t,
-						})
-
-						if len(result) >= 8 {
-							break
-						}
-					}
-				}
+			if len(result) >= 7 {
+				break
 			}
 		}
 	}
 
 	return result
+}
+
+func cleanWorkspaceURI(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var uris []string
+	if err := json.Unmarshal([]byte(raw), &uris); err == nil && len(uris) > 0 {
+		raw = uris[0]
+	}
+	raw = strings.TrimPrefix(raw, "file:///")
+	raw = strings.TrimPrefix(raw, "file://")
+
+	// Decode URL-encoded characters (like %20 -> space)
+	if decoded, err := url.PathUnescape(raw); err == nil {
+		raw = decoded
+	}
+
+	return filepath.Clean(raw)
+}
+
+func formatFriendlyTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	diff := time.Since(t)
+	if diff < 2*time.Minute {
+		return "Baru saja"
+	}
+	if diff < time.Hour {
+		return fmt.Sprintf("%d mnt lalu", int(diff.Minutes()))
+	}
+	if diff < 24*time.Hour {
+		return fmt.Sprintf("%d jam lalu", int(diff.Hours()))
+	}
+	if diff < 48*time.Hour {
+		return "Kemarin"
+	}
+	return t.Format("02/01 15:04")
 }

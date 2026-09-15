@@ -37,18 +37,22 @@ func ResumeKeyboard(convs []session.AvailableConversation, activeID string) tgbo
 	var rows [][]tgbotapi.InlineKeyboardButton
 
 	for i, c := range convs {
-		prefix := fmt.Sprintf("💬 %d. ", i+1)
+		tag := ""
 		if c.ID == activeID {
-			prefix = fmt.Sprintf("🌟 %d. ", i+1)
+			tag = " 🌟"
 		}
-		btnText := fmt.Sprintf("%s%s", prefix, c.Title)
+		timeInfo := ""
+		if c.TimeLabel != "" {
+			timeInfo = " (" + c.TimeLabel + ")"
+		}
+		btnText := fmt.Sprintf("%d. %s%s%s", i+1, c.Title, timeInfo, tag)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(btnText, "resume_id:"+c.ID),
 		))
 	}
 
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("➕ Mulai Sesi Baru", "cmd_new"),
+		tgbotapi.NewInlineKeyboardButtonData("➕ Sesi Baru", "cmd_new"),
 		tgbotapi.NewInlineKeyboardButtonData("« Menu", "cmd_help_menu"),
 		tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
 	))
@@ -58,9 +62,6 @@ func ResumeKeyboard(convs []session.AvailableConversation, activeID string) tgbo
 
 func ResumeConfirmedKeyboard(convID string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
-		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("💬 Lanjut Percakapan Terakhir", "resume_continue:"+convID),
-		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("« Pilih Sesi Lain", "cmd_resume_menu"),
 			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),

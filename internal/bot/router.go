@@ -235,7 +235,59 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		reply.ReplyMarkup = CloseOnlyKeyboard()
 		_, _ = r.bot.Send(reply)
 
-	case "/resume":
+	case "/resume", "/switch":
+		if args != "" {
+			target := strings.TrimSpace(args)
+			convs := r.sm.GetAvailableConversations(userID)
+			var selected *session.AvailableConversation
+			for _, c := range convs {
+				if c.ID == target || strings.HasPrefix(c.ID, target) {
+					selected = &c
+					break
+				}
+			}
+
+			convID := target
+			title := "Percakapan"
+			wsPath := sess.CWD
+			timeLabel := ""
+
+			if selected != nil {
+				convID = selected.ID
+				if selected.Title != "" {
+					title = selected.Title
+				}
+				timeLabel = selected.TimeLabel
+				if selected.Workspace != "" {
+					wsPath = selected.Workspace
+					if info, err := os.Stat(wsPath); err == nil && info.IsDir() {
+						r.sm.UpdateCWD(userID, wsPath)
+					}
+				}
+			}
+
+			r.sm.UpdateConversation(userID, convID, "")
+
+			timeLine := ""
+			if timeLabel != "" {
+				timeLine = fmt.Sprintf("• <b>Waktu</b>: %s\n", timeLabel)
+			}
+
+			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf(
+				"✅ <b>Sesi Obrolan Berhasil Di-Resume!</b>\n\n"+
+					"• <b>Topik</b>: %s\n"+
+					"• <b>Workspace</b>: <code>%s</code>\n"+
+					"%s\n"+
+					"💬 <i>Silakan langsung kirim pesan apa saja di chat untuk melanjutkan percakapan ini.</i>",
+				renderer.EscapeHTML(title), wsPath, timeLine,
+			))
+			reply.ParseMode = "HTML"
+			kb := ResumeConfirmedKeyboard(convID)
+			reply.ReplyMarkup = &kb
+			_, _ = r.bot.Send(reply)
+			return
+		}
+
 		convs := r.sm.GetAvailableConversations(userID)
 		if len(convs) == 0 {
 			reply := tgbotapi.NewMessage(chatID, "📂 <b>Tidak ada riwayat sesi percakapan ditemukan.</b>\nKirim pesan baru untuk memulai percakapan.")
@@ -262,20 +314,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		})
 
 	case "/sessions":
-		reply := tgbotapi.NewMessage(chatID, FormatSessions(sess.RecentConversations, sess.ActiveConversationID))
+		convs := r.sm.GetAvailableConversations(userID)
+		reply := tgbotapi.NewMessage(chatID, FormatSessions(convs, sess.ActiveConversationID))
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = CloseOnlyKeyboard()
-		_, _ = r.bot.Send(reply)
-
-	case "/switch":
-		if args == "" {
-			r.sendText(chatID, "Format: <code>/switch &lt;conversation_id&gt;</code>\nGunakan <code>/sessions</code> untuk melihat daftar ID.")
-			return
-		}
-		r.sm.UpdateConversation(userID, args, "")
-		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Berhasil berpindah ke sesi: <code>%s</code>", args))
-		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = CloseOnlyKeyboard()
+		reply.ReplyMarkup = ResumeKeyboard(convs, sess.ActiveConversationID)
 		_, _ = r.bot.Send(reply)
 
 	case "/cancel", "/stop":
@@ -389,42 +431,44 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		convID := strings.TrimPrefix(data, "resume_id:")
 		r.sm.UpdateConversation(userID, convID, "")
 
-		// Check if we know the workspace for this conversation and switch CWD
+		// Check if we know the workspace and title for this conversation
 		convs := r.sm.GetAvailableConversations(userID)
+		title := "Percakapan"
 		wsPath := sess.CWD
+		timeLabel := ""
 		for _, c := range convs {
-			if c.ID == convID && c.Workspace != "" {
-				wsPath = c.Workspace
-				if info, err := os.Stat(wsPath); err == nil && info.IsDir() {
-					r.sm.UpdateCWD(userID, wsPath)
+			if c.ID == convID {
+				if c.Title != "" {
+					title = c.Title
+				}
+				timeLabel = c.TimeLabel
+				if c.Workspace != "" {
+					wsPath = c.Workspace
+					if info, err := os.Stat(wsPath); err == nil && info.IsDir() {
+						r.sm.UpdateCWD(userID, wsPath)
+					}
 				}
 				break
 			}
 		}
 
+		timeLine := ""
+		if timeLabel != "" {
+			timeLine = fmt.Sprintf("• <b>Waktu</b>: %s\n", timeLabel)
+		}
+
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf(
-			"✅ <b>Sesi Berhasil Di-Resume!</b>\n\n"+
-				"• <b>Conversation ID</b>: <code>%s</code>\n"+
-				"• <b>Workspace</b>: <code>%s</code>\n\n"+
-				"Silakan langsung kirim pesan untuk melanjutkan obrolan di sesi ini, atau tekan tombol di bawah:",
-			convID, wsPath,
+			"✅ <b>Sesi Obrolan Berhasil Di-Resume!</b>\n\n"+
+				"• <b>Topik</b>: %s\n"+
+				"• <b>Workspace</b>: <code>%s</code>\n"+
+				"%s\n"+
+				"💬 <i>Silakan langsung kirim pesan apa saja di chat untuk melanjutkan percakapan ini.</i>",
+			renderer.EscapeHTML(title), wsPath, timeLine,
 		))
 		edit.ParseMode = "HTML"
 		kb := ResumeConfirmedKeyboard(convID)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
-
-	case strings.HasPrefix(data, "resume_continue:"):
-		convID := strings.TrimPrefix(data, "resume_continue:")
-		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
-			UserID:         userID,
-			Prompt:         "Continue the previous task.",
-			CWD:            sess.CWD,
-			ConversationID: convID,
-			PermissionMode: sess.PermissionMode,
-			Model:          sess.ActiveModel,
-			Effort:         sess.ActiveEffort,
-		})
 
 	case data == "cmd_usage":
 		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "📊 Model Quota & Limit", "/usage", "cmd_usage")

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.2] - 2026-09-15
+
+### Fixed & Improved
+- **Human-Readable Conversation Titles in `/resume`**:
+  - Directly reads `~/.gemini/antigravity-cli/conversation_summaries.db` using pure-Go SQLite (`modernc.org/sqlite`, CGO-free) to retrieve actual conversation topics (`preview`) instead of raw UUIDs or unwanted code blocks.
+  - Displays relative timestamps (e.g., `Baru saja`, `15 mnt lalu`, `Kemarin`) and workspace path on each session button.
+  - Resuming binds the session cleanly and lets the user type their next message without triggering unsolicited agent turns.
+  - Supports `/resume <id>` and `/switch <id>` with short ID prefix matching, alongside interactive inline keyboard buttons.
+- **Pure-Go Cross-Compilation**:
+  - Full compatibility with `CGO_ENABLED=0` across Linux (`amd64`/`arm64`), Windows, and macOS without external C toolchains.
+
 ## [1.0.1] - 2026-09-15
 
 ### Added
