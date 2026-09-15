@@ -1,0 +1,138 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - master
+      - main
+    tags:
+      - 'v*'
+  pull_request:
+    branches:
+      - master
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test & Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Build check
+        run: go build -v ./...
+
+      - name: Run unit tests
+        run: go test -v ./...
+
+  build-and-release:
+    name: Cross-Compile & Release
+    needs: test
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            arch: amd64
+            ext: ""
+          - os: linux
+            arch: arm64
+            ext: ""
+          - os: windows
+            arch: amd64
+            ext: ".exe"
+          - os: darwin
+            arch: amd64
+            ext: ""
+          - os: darwin
+            arch: arm64
+            ext: ""
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          check-latest: true
+
+      - name: Set Version Tag
+        id: vars
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          else
+            echo "TAG=v1.0.0-dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Binary
+        env:
+          CGO_ENABLED: 0
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+        run: |
+          OUTPUT_NAME="agy-tele-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          go build -ldflags="-s -w -X main.version=${{ steps.vars.outputs.TAG }}" -o "dist/${OUTPUT_NAME}" ./cmd/agy-tele
+
+      - name: Archive artifacts
+        run: |
+          cd dist
+          TARGET_BIN="agy-tele-${{ matrix.os }}-${{ matrix.arch }}${{ matrix.ext }}"
+          if [ "${{ matrix.os }}" == "windows" ]; then
+            zip "agy-tele-${{ steps.vars.outputs.TAG }}-${{ matrix.os }}-${{ matrix.arch }}.zip" "$TARGET_BIN"
+          else
+            tar -czvf "agy-tele-${{ steps.vars.outputs.TAG }}-${{ matrix.os }}-${{ matrix.arch }}.tar.gz" "$TARGET_BIN"
+          fi
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agy-tele-${{ matrix.os }}-${{ matrix.arch }}
+          path: dist/*.*
+
+  create-github-release:
+    name: Create GitHub Release
+    needs: build-and-release
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate Checksums
+        run: |
+          cd release-assets
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/*
+          name: "Release ${{ github.ref_name }}"
+          draft: false
+          prerelease: false
+          generate_release_notes: true

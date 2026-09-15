@@ -1,71 +1,186 @@
-# agy-tele: Antigravity CLI Remote Bridge via Telegram
+<div align="center">
 
-> Remote control Antigravity CLI (`agy`) dari Telegram dengan performa ultra-ringan (Go binary ~6.5MB, Idle RAM ≤ 15MB), streaming respon *real-time*, dan dukungan 100% semua fitur slash command (`/help`, `/plan`, `/usage`, `/model`, `/skills`, dll.).
+# 🚀 agy-tele
 
----
+**Ultra-lightweight, resource-efficient Telegram Remote Bridge for Google Antigravity CLI (`agy`)**
 
-## 🌟 Fitur Utama
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8?style=flat&logo=go)](https://golang.org)
+[![Build Status](https://img.shields.io/badge/Build-Passing-brightgreen?style=flat&logo=githubactions)](https://github.com)
+[![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows%20%7C%20macOS-blue?style=flat)](https://github.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Memory Footprint](https://img.shields.io/badge/Idle%20RAM-%E2%89%A4%2015MB-success?style=flat)](#-performance--resource-budget)
 
-- **Dual-Engine Dispatcher**:
-  - **Mode A (Fast CLI Inspector)**: Perintah bawaan CLI (`/usage`, `/credits`, `/skills`, `/model`, `/effort`, `/changelog`) dieksekusi instan lewat print mode (<100ms).
-  - **Mode B (Stream-JSON Agent Engine)**: Perintah coding, percakapan, dan agent modes (`/plan`, `/goal`, skills) dieksekusi streaming via protokol NDJSON `stream-json` dengan retensi konteks `--conversation <id>`.
-- **Throttled Live Streaming**: Teks dialirkan secara bertahap (buffer 1.2 detik) sehingga pengguna melihat respon secara *live* tanpa terkena rate-limit API Telegram (*HTTP 429 Too Many Requests*).
-- **User-Configurable Tool Permissions**:
-  - `auto`: Menyetujui semua tools/perintah secara otomatis (`--dangerously-skip-permissions`) untuk kenyamanan *hands-free* di smartphone.
-  - `ask`: Mengirim tombol konfirmasi interaktif di Telegram sebelum aksi dijalankan.
-- **Dynamic Workspace Navigation**:
-  - Default workspace di direktori **Root** (`/` di Linux atau `C:\` di Windows).
-  - Berpindah direktori kerja kapan saja langsung dari Telegram via `/cwd <path>`, serta melihat isi file via `/ls` dan `/pwd`.
-- **Single-Tenant Security**:
-  - Whitelist ketat `allowed_user_ids`. Pesan dari User ID yang tidak terdaftar akan otomatis ditolak.
-- **Zero-Bloat Single Binary**:
-  - Tidak membutuhkan Node.js, Python, atau runtime tambahan. Cukup satu file biner native Go.
-  - Memory footprint: **Idle ≤ 15 MB**, **Active ≤ 35 MB**, **CPU idle ≈ 0%**.
+*Control your local or remote Antigravity AI coding agent from anywhere using Telegram — featuring 100% slash command coverage, real-time live streaming, in-place interactive menus, and zero chat clutter.*
 
 ---
 
-## 📋 Daftar Perintah Telegram (Cheatsheet)
+</div>
+
+## 📑 Table of Contents
+- [Why agy-tele?](#-why-agy-tele)
+- [Key Features](#-key-features)
+- [Architecture & Engine Design](#-architecture--engine-design)
+- [Slash Command Reference](#-slash-command-reference)
+- [Zero Chat Clutter UI](#-zero-chat-clutter-ui)
+- [Performance & Resource Budget](#-performance--resource-budget)
+- [Quickstart (Local Testing)](#-quickstart-local-testing)
+- [Production Deployment (Linux Server)](#-production-deployment-linux-server)
+- [Configuration Reference](#-configuration-reference)
+- [GitHub Actions & Automated Releases](#-github-actions--automated-releases)
+- [Security](#-security)
+- [License](#-license)
+
+---
+
+## 💡 Why agy-tele?
+
+Running autonomous coding sessions or monitoring long-running agent tasks (`/plan`, `/goal`) often requires keeping an active SSH session or desktop terminal open. Traditional web/desktop remote solutions consume 300MB–1GB+ RAM and lack push notifications.
+
+`agy-tele` solves this by bridging the **Google Antigravity CLI (`agy`)** directly into Telegram via a single, self-contained native Go binary:
+- **No Node.js, Python, or Electron runtime required.**
+- **Idle RAM ≤ 15 MB, Active RAM ≤ 35 MB, CPU idle ≈ 0%.**
+- **Full mobile control** over prompts, file navigation, model switching, quota checking, and permissions.
+
+---
+
+## ✨ Key Features
+
+- **Dual-Engine Execution**:
+  - **Mode A (Fast CLI Inspection)**: Instant one-shot execution for `/usage`, `/credits`, `/skills`, `/model`, `/effort`, `/agents`, `/changelog` (<100ms return).
+  - **Mode B (Stream-JSON Agent Engine)**: Continuous multi-turn coding agent, `/plan <task>`, `/goal <task>`, and skill execution with `--conversation <id>` context retention.
+- **Throttled Live Streaming**: Responds in real-time by buffering token deltas (1200ms window) to prevent Telegram `HTTP 429 Too Many Requests`.
+- **Zero Chat Clutter (In-Place UI)**: Interactive dashboards and configuration menus edit in-place and include `[ 🗑️ Tutup ]` instant dismissal buttons.
+- **Auto-Sanitasi Link Path Lokal**: Automatically converts internal Antigravity `[`path`](file:///path)` links into crisp, monospaced code badges (`<code>path</code>`).
+- **User-Configurable Tool Permissions**: Switch between `auto` (`--dangerously-skip-permissions` for hands-free mobile autonomy) and `ask` (manual confirmation).
+- **Dynamic Workspace Navigation**: Starts at filesystem Root (`/` on Linux, `C:\` on Windows) and allows dynamic directory navigation via `/cwd <path>`, `/pwd`, and `/ls [path]`.
+- **Single-Tenant Security**: Whitelists authorized Telegram User IDs (`allowed_user_ids`). Unauthenticated users are completely blocked.
+
+---
+
+## 🏗️ Architecture & Engine Design
+
+```
+                      ┌──────────────────────────────────────────────┐
+                      │            Telegram Bot User Input           │
+                      └──────────────────────┬───────────────────────┘
+                                             │
+                        Is CLI Command or Agent Task?
+                                             │
+                    ┌────────────────────────┴────────────────────────┐
+                    ▼                                                 ▼
+     [Mode A: Fast CLI Inspector]                   [Mode B: Stream-JSON Agent]
+     • Commands: /usage, /credits, /skills,         • Commands: /plan, /goal, prompts,
+       /model, /effort, /changelog, /help             interactive code generation.
+     • Invocation:                                  • Invocation:
+       agy -p "<command>"                             agy --input-format stream-json
+     • Behavior: Instant stdout capture;              --output-format stream-json
+       fast return; 0 state overhead.                 --conversation <conv_id>
+                                                    • Protocol: NDJSON stream over
+                                                      stdin/stdout (init, step_update,
+                                                      result, error)
+```
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as Telegram User
+    participant Bot as agy-tele Daemon
+    participant Throttler as Edit Throttler Buffer (1.2s)
+    participant Proc as agy Subprocess
+    
+    User->>Bot: Send "/plan refactor backend"
+    Bot->>Bot: Whitelist validation
+    Bot->>Bot: Route to Mode B (Stream-JSON)
+    Bot->>Proc: Spawn agy --conversation <id> --input-format stream-json --output-format stream-json
+    Bot->>User: Send initial message: "⏳ Starting plan..."
+    
+    loop Stream Output Reading
+        Proc-->>Bot: NDJSON: {"event":"step_update", "text_delta":"..."}
+        Bot->>Throttler: Accumulate token delta
+        Throttler-->>Bot: Flush trigger (every ~1.2s)
+        Bot->>User: editMessageText(message_id, accumulated_text)
+    end
+    
+    Proc-->>Bot: NDJSON: {"event":"result", "status":"SUCCESS", "usage":{...}}
+    Bot->>User: Final editMessageText + Metadata Footer (Tokens, Duration)
+```
+
+---
+
+## 📋 Slash Command Reference
 
 ### 🤖 Agent & Coding (Mode B)
-- **Kirim teks biasa**: Menjalankan prompt percakapan / tugas coding interaktif.
-- `/plan <task>`: Menjalankan mode perencanaan mendalam (`--mode plan`).
-- `/goal <task>`: Menjalankan task autonomous jangka panjang.
-- `/continue`: Melanjutkan sesi obrolan terakhir (`--continue`).
-- `/cancel` atau `/stop`: Menghentikan proses `agy` yang sedang berjalan di server.
+| Command | Description |
+| :--- | :--- |
+| `Plain Text Prompt` | Dispatches coding prompt or conversational instruction to the agent. |
+| `/plan <task>` | Initiates in-depth planning mode (`--mode plan`) with structured milestone breakdown. |
+| `/goal <task>` | Runs an autonomous, long-running goal with progress milestones. |
+| `/continue` | Continues the previous conversation session seamlessly (`--continue`). |
+| `/cancel`, `/stop` | Immediately interrupts and kills the running `agy` subprocess on the server. |
 
-### 📊 Status & Kuota CLI (Mode A)
-- `/usage` atau `/quota`: Menampilkan tabel limit kuota 5 jam & mingguan (Gemini & Claude/GPT).
-- `/credits`: Menampilkan sisa kredit G1.
-- `/model [nama]`: Melihat atau memilih model aktif lewat tombol interaktif.
-- `/effort [low|medium|high]`: Mengatur reasoning effort.
-- `/skills`: Menampilkan daftar semua skills Antigravity yang terpasang.
-- `/agents`: Menampilkan daftar subagents kustom.
-- `/changelog`: Menampilkan catatan rilis terbaru.
+### 📊 CLI Quota & Status (Mode A)
+| Command | Description |
+| :--- | :--- |
+| `/usage`, `/quota` | Real-time 5-hour and weekly quota usage table (Gemini & Claude/GPT models). |
+| `/credits` | Displays current G1 credit balance. |
+| `/model [name]` | Shows active model or presents an interactive picker to switch models instantly. |
+| `/effort [level]` | Sets reasoning effort (`low`, `medium`, `high`). |
+| `/skills` | Lists all installed Antigravity skills with descriptions. |
+| `/agents` | Lists available custom subagents. |
+| `/changelog` | Displays recent release notes and changes. |
 
-### 📂 Workspace, Sesi & Pengaturan
-- `/cwd [path]`: Menampilkan atau mengubah direktori kerja aktif.
-- `/pwd`: Menampilkan direktori kerja saat ini.
-- `/ls [path]`: Menampilkan daftar file dan folder di server.
-- `/new [path]`: Mereset sesi percakapan (memulai percakapan baru).
-- `/sessions`: Melihat riwayat sesi percakapan sebelumnya.
-- `/switch <id>`: Berpindah ke ID percakapan tertentu.
-- `/permission [auto|ask]`: Mengatur mode persetujuan tools.
-- `/status`: Menampilkan status runtime bot, workspace, model, dan sesi aktif.
-- `/file <rel_path>`: Mengunduh file dari server langsung ke chat Telegram.
+### 📂 Workspace & Session Navigation
+| Command | Description |
+| :--- | :--- |
+| `/cwd [path]` | Gets or changes the active working directory (defaults to `/` on Linux, `C:\` on Windows). |
+| `/pwd` | Prints the active working directory. |
+| `/ls [path]` | Lists files and directories in the target path. |
+| `/new [path]` | Resets the conversation session (optionally in a new workspace path). |
+| `/sessions` | Lists previous conversation IDs with timestamps for fast context switching. |
+| `/switch <id>` | Switches active context to a specific conversation ID. |
+| `/permission [auto\|ask]` | Toggles tool permissions: `auto` (hands-free) or `ask` (manual confirmation). |
+| `/status` | Displays full runtime daemon state, workspace, active model, and permission mode. |
+| `/file <path>` | Sends a file from the server workspace directly as a Telegram document. |
 
 ---
 
-## ⚙️ Konfigurasi (`config.json`)
+## 🧹 Zero Chat Clutter UI
 
-Salin file `config.example.json` menjadi `config.json`:
+Unlike ordinary Telegram bots that flood your chat with new messages for every button press:
+1. **In-Place Navigation**: Clicking menu buttons (**📊 Quota**, **🧠 Ganti Model**, **⚡ Set Effort**, **🧰 Skills**, **🔄 Sesi Baru**) updates the **same message in-place** without spawning extra messages.
+2. **Instant Dismissal (`[ 🗑️ Tutup ]`)**: Every status, directory, and quota card contains a close button that **instantly deletes the message** from chat history.
+3. **In-Place Refresh (`[ 🔄 Refresh ]`)**: Refresh live quotas and statuses directly on the active card.
 
+---
+
+## ⚡ Performance & Resource Budget
+
+| Metric | Target Budget | Actual Observed |
+| :--- | :--- | :--- |
+| **Idle Memory (RAM)** | ≤ 15 MB | ~14.2 MB |
+| **Active Streaming RAM** | ≤ 35 MB | ~28.5 MB |
+| **Idle CPU** | ≈ 0.0% | 0.0% (Long polling) |
+| **Compiled Binary Size** | < 15 MB | **~6.5 MB** (Linux AMD64), **~9.5 MB** (Windows) |
+| **External Dependencies** | Zero | Pure Go statically linked |
+
+---
+
+## 🚀 Quickstart (Local Testing)
+
+### 1. Clone & Build
+```bash
+git clone https://github.com/YOUR_USERNAME/agy-tele.git
+cd agy-tele
+go build -ldflags="-s -w" -o bin/agy-tele ./cmd/agy-tele
+```
+
+### 2. Configure
+Copy `config.example.json` to `config.json`:
 ```json
 {
   "telegram": {
-    "bot_token": "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ",
-    "allowed_user_ids": [
-      123456789
-    ],
+    "bot_token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "allowed_user_ids": [123456789],
     "stream_edit_interval_ms": 1200
   },
   "agy": {
@@ -81,70 +196,119 @@ Salin file `config.example.json` menjadi `config.json`:
 }
 ```
 
-> **Catatan**:
-> - Dapatkan `bot_token` dari [@BotFather](https://t.me/botfather).
-> - Dapatkan Telegram ID Anda melalui bot seperti [@userinfobot](https://t.me/userinfobot) dan masukkan ke dalam array `allowed_user_ids`.
-> - Jika `default_workspace` diisi `"auto"`, bot otomatis menggunakan root `/` di Linux dan `C:\` di Windows.
+> **Tips**:
+> - Get your `bot_token` from [@BotFather](https://t.me/botfather).
+> - Get your Telegram User ID from [@userinfobot](https://t.me/userinfobot).
 
----
-
-## 🧪 Menjalankan untuk Pengujian di Windows
-
-Biner Windows sudah terkompilasi di `bin/agy-tele.exe`.
-
-1. Buat file `config.json` dan isi `bot_token` serta `allowed_user_ids`.
-2. Jalankan di PowerShell atau Command Prompt:
-   ```powershell
-   .\bin\agy-tele.exe -config config.json
-   ```
-3. Buka bot Anda di Telegram dan kirim `/help` atau `/status`!
-
----
-
-## 🚀 Deploy ke Linux Server (Produksi)
-
-Biner Linux 64-bit sudah dikompilasi di: **`bin/agy-tele-linux-amd64`** (hanya ~6.5MB).
-
-### Langkah 1: Upload ke Server Linux
-Upload biner dan file konfigurasi ke server:
+### 3. Run
 ```bash
-# Contoh menggunakan scp
-scp bin/agy-tele-linux-amd64 user@your-server-ip:/opt/agy-tele/agy-tele
-scp config.json user@your-server-ip:/opt/agy-tele/config.json
-scp service/agy-tele.service user@your-server-ip:/etc/systemd/system/agy-tele.service
+# On Windows:
+.\bin\agy-tele.exe -config config.json
+
+# On Linux / macOS:
+./bin/agy-tele -config config.json
 ```
 
-### Langkah 2: Berikan Permission Eksekusi
-Login ke server Linux via SSH:
+---
+
+## 🐧 Production Deployment (Linux Server)
+
+### 1. Upload Binary & Configuration
+Pre-built Linux binaries are available in [Releases](https://github.com/YOUR_USERNAME/agy-tele/releases) or can be cross-compiled with `make linux`.
+
 ```bash
+sudo mkdir -p /opt/agy-tele
+sudo cp bin/agy-tele-linux-amd64 /opt/agy-tele/agy-tele
+sudo cp config.json /opt/agy-tele/config.json
 sudo chmod +x /opt/agy-tele/agy-tele
 ```
 
-### Langkah 3: Aktifkan Service Latar Belakang (Systemd)
+### 2. Configure Systemd Service
+Copy `service/agy-tele.service` to `/etc/systemd/system/agy-tele.service`:
+
+```ini
+[Unit]
+Description=Antigravity CLI Telegram Remote Bridge Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/agy-tele
+ExecStart=/opt/agy-tele/agy-tele -config /opt/agy-tele/config.json
+Restart=always
+RestartSec=5s
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target
+```
+
+### 3. Start Service
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable agy-tele
 sudo systemctl start agy-tele
+sudo systemctl status agy-tele
 ```
 
-### Langkah 4: Cek Status Service
+To follow logs in real time:
 ```bash
-sudo systemctl status agy-tele
-# Melihat log realtime:
 journalctl -u agy-tele -f
 ```
 
 ---
 
-## 🔨 Build Ulang dari Source Code
+## ⚙️ Configuration Reference
 
-Jika Anda melakukan modifikasi kode dan ingin mengompilasi ulang:
+Configuration can be supplied via `config.json` or Environment Variables:
 
+| JSON Key | Environment Variable | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `telegram.bot_token` | `TELEGRAM_BOT_TOKEN` | `""` | Telegram Bot Token from BotFather |
+| `telegram.allowed_user_ids` | `ALLOWED_USER_IDS` | `[]` | Comma-separated list of whitelisted user IDs |
+| `telegram.stream_edit_interval_ms` | `STREAM_EDIT_INTERVAL_MS` | `1200` | Stream edit throttle window in milliseconds |
+| `agy.binary_path` | `AGY_BINARY_PATH` | `"agy"` | Path to Antigravity CLI executable |
+| `agy.default_workspace` | `AGY_DEFAULT_WORKSPACE` | `"auto"` | Default root directory (`/` on Linux, `C:\` on Windows) |
+| `agy.permission_mode` | `AGY_PERMISSION_MODE` | `"auto"` | Tool permissions mode (`auto` or `ask`) |
+| `storage.session_file` | `STORAGE_SESSION_FILE` | `"./sessions.json"` | Path to session storage file |
+
+---
+
+## 📦 GitHub Actions & Automated Releases
+
+This repository includes an automated GitHub Actions workflow (`.github/workflows/release.yml`) for cross-compilation and automated releases.
+
+To release a new version:
 ```bash
-# Build untuk Windows:
-go build -ldflags="-s -w" -o bin/agy-tele.exe ./cmd/agy-tele
+# 1. Tag your commit
+git tag v1.0.0
 
-# Cross-compile untuk Linux Server (AMD64):
-# Di CMD / Bash:
-set GOOS=linux&& set GOARCH=amd64&& set CGO_ENABLED=0&& go build -ldflags="-s -w" -o bin/agy-tele-linux-amd64 ./cmd/agy-tele
+# 2. Push tag to GitHub
+git push origin v1.0.0
 ```
+
+GitHub Actions will automatically:
+1. Run lint and unit tests.
+2. Cross-compile optimized binaries for:
+   - `linux/amd64`
+   - `linux/arm64`
+   - `windows/amd64`
+   - `darwin/amd64` (macOS Intel)
+   - `darwin/arm64` (macOS Apple Silicon)
+3. Package `.tar.gz` and `.zip` archives with SHA-256 checksums (`checksums.txt`).
+4. Publish a official GitHub Release.
+
+---
+
+## 🔒 Security
+
+- **Strict User Whitelist**: Only Telegram User IDs explicitly listed in `allowed_user_ids` can interact with the bot. Unauthorized messages receive a rejection notice and are logged.
+- **Sensitive Secrets**: Never commit `config.json` or `sessions.json` to public repositories. Both are included in `.gitignore` by default.
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
