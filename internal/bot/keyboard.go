@@ -1,11 +1,19 @@
 package bot
 
 import (
+	"fmt"
+
+	"agy-tele/internal/session"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func QuickActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📂 Resume Sesi", "cmd_resume_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🔄 Sesi Baru", "cmd_new"),
+		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📊 Quota/Usage", "cmd_usage"),
 			tgbotapi.NewInlineKeyboardButtonData("💰 Credits", "cmd_credits"),
@@ -19,11 +27,43 @@ func QuickActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("⚙️ Status & CWD", "cmd_status"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔄 Sesi Baru", "cmd_new"),
 			tgbotapi.NewInlineKeyboardButtonData("🔒 Atur Permission", "cmd_perm_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Menu", "cmd_delete_msg"),
+		),
+	)
+}
+
+func ResumeKeyboard(convs []session.AvailableConversation, activeID string) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	for i, c := range convs {
+		prefix := fmt.Sprintf("💬 %d. ", i+1)
+		if c.ID == activeID {
+			prefix = fmt.Sprintf("🌟 %d. ", i+1)
+		}
+		btnText := fmt.Sprintf("%s%s", prefix, c.Title)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(btnText, "resume_id:"+c.ID),
+		))
+	}
+
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("➕ Mulai Sesi Baru", "cmd_new"),
+		tgbotapi.NewInlineKeyboardButtonData("« Menu", "cmd_help_menu"),
+		tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+	))
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+func ResumeConfirmedKeyboard(convID string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("💬 Lanjut Percakapan Terakhir", "resume_continue:"+convID),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Menu", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData("« Pilih Sesi Lain", "cmd_resume_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
 		),
 	)
 }

@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-09-15
+
+### Added
+- **Interactive `/resume` Conversation Picker**:
+  - Automatically lists recent conversations from both bot session storage and `~/.gemini/antigravity-cli/history.jsonl`.
+  - Interactive Inline Keyboard buttons allowing users to tap and resume any past conversation ID directly.
+  - Automatic workspace directory alignment when resuming conversations.
+  - Quick action button `[ 💬 Lanjut Percakapan Terakhir ]` to immediately resume from mobile.
+- **Automatic Telegram Slash Command Menu (`setMyCommands`)**:
+  - Automatically registers all bot slash commands with the Telegram Bot API on startup so typing `/` in Telegram clients (Mobile, Desktop, Web) immediately displays the command popup autocomplete list with descriptions.
+
 ## [1.0.0] - 2026-09-15
 
 ### Added

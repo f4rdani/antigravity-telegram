@@ -14,9 +14,10 @@ func FormatHelp() string {
 	sb.WriteString("🤖 <b>Antigravity CLI Remote Bridge (agy-tele)</b>\n\n")
 	sb.WriteString("<b>⚡ Agent Execution (Mode B):</b>\n")
 	sb.WriteString("• Kirim teks biasa untuk prompt / coding agent\n")
+	sb.WriteString("• <code>/resume</code> — Pilih dan lanjutkan sesi percakapan sebelumnya\n")
 	sb.WriteString("• <code>/plan &lt;task&gt;</code> — Jalankan perencanaan terstruktur\n")
 	sb.WriteString("• <code>/goal &lt;task&gt;</code> — Jalankan task autonomous jangka panjang\n")
-	sb.WriteString("• <code>/continue</code> — Lanjutkan sesi obrolan terakhir\n")
+	sb.WriteString("• <code>/continue</code> — Lanjutkan sesi obrolan terakhir langsung\n")
 	sb.WriteString("• <code>/cancel</code> atau <code>/stop</code> — Hentikan proses yang sedang berjalan\n\n")
 
 	sb.WriteString("<b>📊 CLI Status & Kuota (Mode A):</b>\n")

@@ -235,6 +235,20 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		reply.ReplyMarkup = CloseOnlyKeyboard()
 		_, _ = r.bot.Send(reply)
 
+	case "/resume":
+		convs := r.sm.GetAvailableConversations(userID)
+		if len(convs) == 0 {
+			reply := tgbotapi.NewMessage(chatID, "📂 <b>Tidak ada riwayat sesi percakapan ditemukan.</b>\nKirim pesan baru untuk memulai percakapan.")
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = CloseOnlyKeyboard()
+			_, _ = r.bot.Send(reply)
+			return
+		}
+		reply := tgbotapi.NewMessage(chatID, "📂 <b>Pilih Sesi untuk Di-Resume (/resume):</b>\nSilakan pilih salah satu sesi di bawah:")
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = ResumeKeyboard(convs, sess.ActiveConversationID)
+		_, _ = r.bot.Send(reply)
+
 	case "/continue":
 		r.sendText(chatID, "⏳ Melanjutkan sesi percakapan sebelumnya...")
 		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
@@ -354,6 +368,63 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		kb := QuickActionKeyboard()
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
+
+	case data == "cmd_resume_menu":
+		convs := r.sm.GetAvailableConversations(userID)
+		if len(convs) == 0 {
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, "📂 <b>Tidak ada riwayat sesi percakapan ditemukan.</b>")
+			edit.ParseMode = "HTML"
+			kb := CloseOnlyKeyboard()
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		} else {
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, "📂 <b>Pilih Sesi untuk Di-Resume (/resume):</b>\nSilakan pilih sesi di bawah untuk melanjutkan percakapan:")
+			edit.ParseMode = "HTML"
+			kb := ResumeKeyboard(convs, sess.ActiveConversationID)
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		}
+
+	case strings.HasPrefix(data, "resume_id:"):
+		convID := strings.TrimPrefix(data, "resume_id:")
+		r.sm.UpdateConversation(userID, convID, "")
+
+		// Check if we know the workspace for this conversation and switch CWD
+		convs := r.sm.GetAvailableConversations(userID)
+		wsPath := sess.CWD
+		for _, c := range convs {
+			if c.ID == convID && c.Workspace != "" {
+				wsPath = c.Workspace
+				if info, err := os.Stat(wsPath); err == nil && info.IsDir() {
+					r.sm.UpdateCWD(userID, wsPath)
+				}
+				break
+			}
+		}
+
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf(
+			"✅ <b>Sesi Berhasil Di-Resume!</b>\n\n"+
+				"• <b>Conversation ID</b>: <code>%s</code>\n"+
+				"• <b>Workspace</b>: <code>%s</code>\n\n"+
+				"Silakan langsung kirim pesan untuk melanjutkan obrolan di sesi ini, atau tekan tombol di bawah:",
+			convID, wsPath,
+		))
+		edit.ParseMode = "HTML"
+		kb := ResumeConfirmedKeyboard(convID)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case strings.HasPrefix(data, "resume_continue:"):
+		convID := strings.TrimPrefix(data, "resume_continue:")
+		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+			UserID:         userID,
+			Prompt:         "Continue the previous task.",
+			CWD:            sess.CWD,
+			ConversationID: convID,
+			PermissionMode: sess.PermissionMode,
+			Model:          sess.ActiveModel,
+			Effort:         sess.ActiveEffort,
+		})
 
 	case data == "cmd_usage":
 		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "📊 Model Quota & Limit", "/usage", "cmd_usage")
