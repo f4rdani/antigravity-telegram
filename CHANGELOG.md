@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-09-15
+
+### Added & Fixed
+- **Transparent Real-Time Activity Tracking**:
+  - Automatically captures `step_update` tool events (`run_command`, `view_file`, `write_to_file`, `replace_file_content`, `grep_search`, `find_by_name`, web tools, etc.) and thinking steps.
+  - Displays live, human-readable action badges and recent step breadcrumbs during agent execution.
+  - Updates in-place with zero chat clutter; smoothly transitions to streaming assistant response and final clean answer upon completion.
+- **Fixed `(Empty response)` Bug**:
+  - Replaced ambiguous `(Empty response)` fallback when agent turns complete after running background tools without emitting text deltas.
+  - Automatically formats a clean summary of completed actions.
+
 ## [1.0.2] - 2026-09-15
 
 ### Fixed & Improved

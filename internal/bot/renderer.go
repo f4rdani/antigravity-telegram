@@ -160,3 +160,176 @@ func StripHTML(s string) string {
 }
 
 
+
+func DescribeStepAction(step *engine.StepUpdatePayload) string {
+	if step == nil {
+		return "Sedang memproses..."
+	}
+
+	if step.StepType == "agent_response" {
+		if step.State == "ACTIVE" && step.TextDelta == "" {
+			return "💭 <i>Menganalisis instruksi & berpikir...</i>"
+		}
+		return "✍️ <i>Menulis balasan...</i>"
+	}
+
+	if step.StepType == "tool" {
+		toolName := step.ToolName
+		if toolName == "" && step.ToolInfo != nil {
+			toolName = step.ToolInfo.Name
+		}
+
+		params := make(map[string]interface{})
+		if step.ToolInfo != nil && step.ToolInfo.Parameters != nil {
+			params = step.ToolInfo.Parameters
+		}
+
+		switch toolName {
+		case "run_command":
+			cmd := ""
+			if v, ok := params["CommandLine"].(string); ok && v != "" {
+				cmd = v
+			}
+			if len(cmd) > 80 {
+				cmd = cmd[:77] + "..."
+			}
+			if cmd != "" {
+				return fmt.Sprintf("⚡ <b>Menjalankan:</b> <code>%s</code>", EscapeHTML(cmd))
+			}
+			return "⚡ Menjalankan perintah terminal..."
+
+		case "view_file":
+			path := ""
+			if v, ok := params["AbsolutePath"].(string); ok && v != "" {
+				path = v
+			}
+			if path != "" {
+				return fmt.Sprintf("📖 <b>Membaca file:</b> <code>%s</code>", EscapeHTML(path))
+			}
+			return "📖 Membaca file..."
+
+		case "write_to_file":
+			path := ""
+			if v, ok := params["TargetFile"].(string); ok && v != "" {
+				path = v
+			}
+			if path != "" {
+				return fmt.Sprintf("📝 <b>Menulis file:</b> <code>%s</code>", EscapeHTML(path))
+			}
+			return "📝 Menulis file baru..."
+
+		case "replace_file_content":
+			path := ""
+			if v, ok := params["TargetFile"].(string); ok && v != "" {
+				path = v
+			}
+			if path != "" {
+				return fmt.Sprintf("✏️ <b>Mengedit file:</b> <code>%s</code>", EscapeHTML(path))
+			}
+			return "✏️ Mengedit file..."
+
+		case "grep_search":
+			q := ""
+			if v, ok := params["Query"].(string); ok && v != "" {
+				q = v
+			}
+			if len(q) > 60 {
+				q = q[:57] + "..."
+			}
+			if q != "" {
+				return fmt.Sprintf("🔍 <b>Mencari:</b> <code>%s</code>", EscapeHTML(q))
+			}
+			return "🔍 Mencari teks di kode..."
+
+		case "find_by_name":
+			pat := ""
+			if v, ok := params["Pattern"].(string); ok && v != "" {
+				pat = v
+			}
+			if pat != "" {
+				return fmt.Sprintf("📂 <b>Mencari file:</b> <code>%s</code>", EscapeHTML(pat))
+			}
+			return "📂 Mencari file..."
+
+		case "list_dir":
+			dir := ""
+			if v, ok := params["DirectoryPath"].(string); ok && v != "" {
+				dir = v
+			}
+			if dir != "" {
+				return fmt.Sprintf("📁 <b>Melihat folder:</b> <code>%s</code>", EscapeHTML(dir))
+			}
+			return "📁 Melihat folder..."
+
+		case "search_web":
+			q := ""
+			if v, ok := params["query"].(string); ok && v != "" {
+				q = v
+			}
+			if q != "" {
+				return fmt.Sprintf("🌐 <b>Mencari web:</b> <i>%s</i>", EscapeHTML(q))
+			}
+			return "🌐 Mencari web..."
+
+		case "read_url_content":
+			u := ""
+			if v, ok := params["Url"].(string); ok && v != "" {
+				u = v
+			}
+			if len(u) > 60 {
+				u = u[:57] + "..."
+			}
+			if u != "" {
+				return fmt.Sprintf("🌐 <b>Mengunduh web:</b> <code>%s</code>", EscapeHTML(u))
+			}
+			return "🌐 Membaca halaman web..."
+
+		case "manage_task":
+			action := ""
+			if v, ok := params["Action"].(string); ok && v != "" {
+				action = v
+			}
+			if action != "" {
+				return fmt.Sprintf("📋 <b>Task manager:</b> %s", EscapeHTML(action))
+			}
+			return "📋 Mengelola task latar belakang..."
+
+		case "invoke_subagent":
+			return "🤖 <b>Memanggil subagent...</b>"
+
+		default:
+			if v, ok := params["toolAction"].(string); ok && v != "" {
+				return fmt.Sprintf("🛠️ <b>%s</b>", EscapeHTML(v))
+			}
+			if v, ok := params["toolSummary"].(string); ok && v != "" {
+				return fmt.Sprintf("🛠️ <b>%s</b>", EscapeHTML(v))
+			}
+			if toolName != "" {
+				return fmt.Sprintf("🛠️ <b>Tool:</b> <code>%s</code>", EscapeHTML(toolName))
+			}
+			return "⚙️ Menjalankan langkah otomatis..."
+		}
+	}
+
+	return "⏳ Sedang memproses..."
+}
+
+func FormatProgressStatus(currentAction string, recentHistory []string) string {
+	var sb strings.Builder
+	sb.WriteString("⏳ <b>Antigravity sedang bekerja...</b>\n\n")
+
+	if len(recentHistory) > 0 {
+		sb.WriteString("<i>Aktivitas:</i>\n")
+		for _, h := range recentHistory {
+			sb.WriteString(fmt.Sprintf("• %s\n", h))
+		}
+		sb.WriteString("\n")
+	}
+
+	if currentAction != "" {
+		sb.WriteString(fmt.Sprintf("🔄 <b>Saat ini:</b>\n%s\n\n", currentAction))
+	}
+
+	sb.WriteString("<i>(Hasil akhir akan tampil otomatis setelah selesai)</i>")
+	return sb.String()
+}

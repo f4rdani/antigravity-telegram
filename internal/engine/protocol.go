@@ -21,16 +21,25 @@ type StreamInitPayload struct {
 	CWD            string   `json:"cwd"`
 	Tools          []string `json:"tools"`
 	PermissionMode string   `json:"permission_mode"`
+	Model          string   `json:"model,omitempty"`
+}
+
+type ToolInfoPayload struct {
+	Name       string                 `json:"name,omitempty"`
+	Parameters map[string]interface{} `json:"parameters,omitempty"`
+	Output     string                 `json:"output,omitempty"`
 }
 
 type StepUpdatePayload struct {
-	ConversationID  string      `json:"conversation_id"`
-	StepIndex       int         `json:"step_index"`
-	State           string      `json:"state"` // "ACTIVE", "DONE"
-	StepType        string      `json:"step_type"` // "user_input", "agent_response", "system_message", "tool_call"
-	TextDelta       string      `json:"text_delta,omitempty"`
-	DurationSeconds float64     `json:"duration_seconds,omitempty"`
-	Usage           *TokenUsage `json:"usage,omitempty"`
+	ConversationID  string           `json:"conversation_id"`
+	StepIndex       int              `json:"step_index"`
+	State           string           `json:"state"` // "ACTIVE", "DONE"
+	StepType        string           `json:"step_type"` // "user_input", "agent_response", "system_message", "tool"
+	ToolName        string           `json:"tool_name,omitempty"`
+	ToolInfo        *ToolInfoPayload `json:"tool_info,omitempty"`
+	TextDelta       string           `json:"text_delta,omitempty"`
+	DurationSeconds float64          `json:"duration_seconds,omitempty"`
+	Usage           *TokenUsage      `json:"usage,omitempty"`
 }
 
 type ResultPayload struct {

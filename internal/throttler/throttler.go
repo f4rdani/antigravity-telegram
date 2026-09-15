@@ -1,6 +1,7 @@
 package throttler
 
 import (
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +17,8 @@ type MessageThrottler struct {
 	chatID        int64
 	messageID     int
 	builder       strings.Builder
+	statusText    string
+	hasTextDelta  bool
 	dirty         bool
 	interval      time.Duration
 	stopCh        chan struct{}
@@ -43,9 +46,19 @@ func NewMessageThrottler(bot *tgbotapi.BotAPI, chatID int64, initialMessageID in
 	return t
 }
 
+func (t *MessageThrottler) SetStatus(status string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.hasTextDelta {
+		t.statusText = status
+		t.dirty = true
+	}
+}
+
 func (t *MessageThrottler) Append(delta string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.hasTextDelta = true
 	t.builder.WriteString(delta)
 	t.dirty = true
 }
@@ -73,30 +86,33 @@ func (t *MessageThrottler) flushInternal() {
 		return
 	}
 
-	fullText := t.builder.String()
 	t.dirty = false
 	currentMsgID := t.activeMessage
+
+	var textToRender string
+	if t.hasTextDelta {
+		textToRender = renderer.FormatMarkdownForTelegram(t.builder.String())
+	} else if t.statusText != "" {
+		textToRender = t.statusText
+	}
 	t.mu.Unlock()
 
-	if strings.TrimSpace(fullText) == "" {
+	if strings.TrimSpace(textToRender) == "" {
 		return
 	}
 
-	formatted := renderer.FormatMarkdownForTelegram(fullText)
 	const maxChars = 3900
-
-	if len(formatted) <= maxChars {
-		editMsg := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, formatted)
+	if len(textToRender) <= maxChars {
+		editMsg := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, textToRender)
 		editMsg.ParseMode = "HTML"
 		_, err := t.bot.Send(editMsg)
 		if err != nil && !strings.Contains(err.Error(), "message is not modified") {
-			// Fallback: send as plain text without HTML parse mode
-			plain := renderer.StripHTML(formatted)
+			plain := renderer.StripHTML(textToRender)
 			editPlain := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, plain)
 			_, _ = t.bot.Send(editPlain)
 		}
 	} else {
-		chunks := splitIntoChunks(formatted, maxChars)
+		chunks := splitIntoChunks(textToRender, maxChars)
 		if len(chunks) > 0 {
 			editMsg := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, chunks[0])
 			editMsg.ParseMode = "HTML"
@@ -131,7 +147,7 @@ func (t *MessageThrottler) Stop() string {
 	return t.builder.String()
 }
 
-func (t *MessageThrottler) Finalize(finalText string, footer string) {
+func (t *MessageThrottler) Finalize(finalText string, footer string, fallbackActions []string) {
 	t.Stop()
 
 	t.mu.Lock()
@@ -142,7 +158,16 @@ func (t *MessageThrottler) Finalize(finalText string, footer string) {
 		text = t.builder.String()
 	}
 	if text == "" {
-		text = "(Empty response)"
+		if len(fallbackActions) > 0 {
+			var sb strings.Builder
+			sb.WriteString("✅ <b>Tugas selesai dieksekusi.</b>\n\n<i>Ringkasan aktivitas:</i>\n")
+			for _, a := range fallbackActions {
+				sb.WriteString(fmt.Sprintf("• %s\n", a))
+			}
+			text = sb.String()
+		} else {
+			text = "✅ <b>Tugas selesai.</b>"
+		}
 	}
 
 	formatted := renderer.FormatMarkdownForTelegram(text)

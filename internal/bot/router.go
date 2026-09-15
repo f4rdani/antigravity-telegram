@@ -2,6 +2,7 @@ package bot
 
 import (
 	"context"
+	"sync"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -624,6 +625,8 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 	streamBuffer := throttler.NewMessageThrottler(r.bot, chatID, sentMsg.MessageID, r.cfg.Telegram.StreamEditIntervalMs)
 
 	var lastConvID string
+	var recentHistory []string
+	var historyMu sync.Mutex
 
 	callbacks := engine.StreamCallbacks{
 		OnInit: func(conversationID string, init *engine.StreamInitPayload) {
@@ -631,6 +634,29 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			if sess.ActiveConversationID != conversationID {
 				r.sm.UpdateConversation(opts.UserID, conversationID, "")
 			}
+		},
+		OnStepUpdate: func(step *engine.StepUpdatePayload) {
+			if step == nil {
+				return
+			}
+			historyMu.Lock()
+			defer historyMu.Unlock()
+
+			actionDesc := DescribeStepAction(step)
+			if step.State == "DONE" && step.StepType == "tool" {
+				dur := ""
+				if step.DurationSeconds > 0 {
+					dur = fmt.Sprintf(" (%.1fs)", step.DurationSeconds)
+				}
+				item := fmt.Sprintf("%s%s", actionDesc, dur)
+				recentHistory = append(recentHistory, item)
+				if len(recentHistory) > 4 {
+					recentHistory = recentHistory[len(recentHistory)-4:]
+				}
+			}
+
+			statusMsg := FormatProgressStatus(actionDesc, recentHistory)
+			streamBuffer.SetStatus(statusMsg)
 		},
 		OnDelta: func(delta string) {
 			streamBuffer.Append(delta)
@@ -655,7 +681,12 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 		finalText = fmt.Sprintf("❌ Terjadi kesalahan:\n%s", err.Error())
 	}
 
-	streamBuffer.Finalize(finalText, footer)
+	historyMu.Lock()
+	doneActions := make([]string, len(recentHistory))
+	copy(doneActions, recentHistory)
+	historyMu.Unlock()
+
+	streamBuffer.Finalize(finalText, footer, doneActions)
 }
 
 func (r *Router) handleListDir(chatID int64, targetPath string) {
