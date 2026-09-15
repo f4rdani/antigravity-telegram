@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-09-15
+
+### Added & Improved
+- **Auto-Deleting Real-Time Activity Badge**:
+  - Dynamically displays real-time tool actions (e.g., `Bash(cmd)`, `View(path)`, `Edit(path)`, `Search(query)`) in a dedicated temporary status badge.
+  - Automatically deletes the activity badge when the assistant begins outputting the final response or turn completes, ensuring zero chat clutter.
+  - Guarantees the primary response message remains clean, permanent, and untouched.
+
 ## [1.0.3] - 2026-09-15
 
 ### Added & Fixed

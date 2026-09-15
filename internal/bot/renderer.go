@@ -333,3 +333,107 @@ func FormatProgressStatus(currentAction string, recentHistory []string) string {
 	sb.WriteString("<i>(Hasil akhir akan tampil otomatis setelah selesai)</i>")
 	return sb.String()
 }
+
+func FormatActivityBadge(step *engine.StepUpdatePayload) string {
+	if step == nil {
+		return "💭 <i>Sedang berpikir...</i>"
+	}
+
+	if step.StepType == "agent_response" {
+		if step.State == "ACTIVE" && step.TextDelta == "" {
+			return "💭 <i>Menganalisis instruksi & berpikir...</i>"
+		}
+		return "✍️ <i>Menulis balasan...</i>"
+	}
+
+	if step.StepType == "tool" {
+		toolName := step.ToolName
+		if toolName == "" && step.ToolInfo != nil {
+			toolName = step.ToolInfo.Name
+		}
+
+		params := make(map[string]interface{})
+		if step.ToolInfo != nil && step.ToolInfo.Parameters != nil {
+			params = step.ToolInfo.Parameters
+		}
+
+		switch toolName {
+		case "run_command":
+			cmd := ""
+			if v, ok := params["CommandLine"].(string); ok && v != "" {
+				cmd = v
+			}
+			if len(cmd) > 100 {
+				cmd = cmd[:97] + "..."
+			}
+			if cmd != "" {
+				return fmt.Sprintf("⚡ <code>Bash(%s)</code>", EscapeHTML(cmd))
+			}
+			return "⚡ <code>Bash(...)</code>"
+
+		case "view_file":
+			path := ""
+			if v, ok := params["AbsolutePath"].(string); ok && v != "" {
+				path = v
+			}
+			if path != "" {
+				return fmt.Sprintf("📖 <code>View(%s)</code>", EscapeHTML(path))
+			}
+			return "📖 <code>View(...)</code>"
+
+		case "write_to_file":
+			path := ""
+			if v, ok := params["TargetFile"].(string); ok && v != "" {
+				path = v
+			}
+			if path != "" {
+				return fmt.Sprintf("📝 <code>Write(%s)</code>", EscapeHTML(path))
+			}
+			return "📝 <code>Write(...)</code>"
+
+		case "replace_file_content":
+			path := ""
+			if v, ok := params["TargetFile"].(string); ok && v != "" {
+				path = v
+			}
+			if path != "" {
+				return fmt.Sprintf("✏️ <code>Edit(%s)</code>", EscapeHTML(path))
+			}
+			return "✏️ <code>Edit(...)</code>"
+
+		case "grep_search":
+			q := ""
+			if v, ok := params["Query"].(string); ok && v != "" {
+				q = v
+			}
+			if len(q) > 80 {
+				q = q[:77] + "..."
+			}
+			if q != "" {
+				return fmt.Sprintf("🔍 <code>Search(%s)</code>", EscapeHTML(q))
+			}
+			return "🔍 <code>Search(...)</code>"
+
+		case "find_by_name":
+			pat := ""
+			if v, ok := params["Pattern"].(string); ok && v != "" {
+				pat = v
+			}
+			if pat != "" {
+				return fmt.Sprintf("📂 <code>Find(%s)</code>", EscapeHTML(pat))
+			}
+			return "📂 <code>Find(...)</code>"
+
+		default:
+			if v, ok := params["toolAction"].(string); ok && v != "" {
+				return fmt.Sprintf("🛠️ <code>%s</code>", EscapeHTML(v))
+			}
+			if toolName != "" {
+				return fmt.Sprintf("🛠️ <code>Tool(%s)</code>", EscapeHTML(toolName))
+			}
+			return "⚙️ <i>Sedang bekerja...</i>"
+		}
+	}
+
+	return "⏳ <i>Sedang memproses...</i>"
+}

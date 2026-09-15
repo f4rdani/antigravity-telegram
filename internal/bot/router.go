@@ -609,24 +609,19 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions) {
 	ctx := context.Background()
 
-	initialText := "⏳ <b>Antigravity sedang berpikir...</b>"
+	initialText := "💭 <i>Menganalisis instruksi...</i>"
 	if opts.Mode == "plan" {
-		initialText = "📋 <b>Menyiapkan rencana (/plan)...</b>"
+		initialText = "📋 <i>Menyiapkan rencana (/plan)...</i>"
 	}
 
-	initMsg := tgbotapi.NewMessage(chatID, initialText)
-	initMsg.ParseMode = "HTML"
-	sentMsg, err := r.bot.Send(initMsg)
-	if err != nil {
-		return
-	}
-
-	// Create throttled streamer
-	streamBuffer := throttler.NewMessageThrottler(r.bot, chatID, sentMsg.MessageID, r.cfg.Telegram.StreamEditIntervalMs)
+	activityTracker := throttler.NewActivityTracker(r.bot, chatID, initialText)
 
 	var lastConvID string
-	var recentHistory []string
-	var historyMu sync.Mutex
+	var recentActions []string
+	var mu sync.Mutex
+
+	var streamBuffer *throttler.MessageThrottler
+	var responseStarted bool
 
 	callbacks := engine.StreamCallbacks{
 		OnInit: func(conversationID string, init *engine.StreamInitPayload) {
@@ -639,34 +634,61 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			if step == nil {
 				return
 			}
-			historyMu.Lock()
-			defer historyMu.Unlock()
+			badge := FormatActivityBadge(step)
 
-			actionDesc := DescribeStepAction(step)
+			mu.Lock()
 			if step.State == "DONE" && step.StepType == "tool" {
 				dur := ""
 				if step.DurationSeconds > 0 {
 					dur = fmt.Sprintf(" (%.1fs)", step.DurationSeconds)
 				}
-				item := fmt.Sprintf("%s%s", actionDesc, dur)
-				recentHistory = append(recentHistory, item)
-				if len(recentHistory) > 4 {
-					recentHistory = recentHistory[len(recentHistory)-4:]
-				}
+				recentActions = append(recentActions, fmt.Sprintf("%s%s", badge, dur))
 			}
+			isStreaming := responseStarted
+			mu.Unlock()
 
-			statusMsg := FormatProgressStatus(actionDesc, recentHistory)
-			streamBuffer.SetStatus(statusMsg)
+			if !isStreaming {
+				go activityTracker.Update(badge)
+			}
 		},
 		OnDelta: func(delta string) {
-			streamBuffer.Append(delta)
+			mu.Lock()
+			if !responseStarted {
+				responseStarted = true
+				activityTracker.Delete()
+
+				initResp := tgbotapi.NewMessage(chatID, delta)
+				initResp.ParseMode = "HTML"
+				sentMsg, err := r.bot.Send(initResp)
+				msgID := 0
+				if err == nil {
+					msgID = sentMsg.MessageID
+				}
+				streamBuffer = throttler.NewMessageThrottler(r.bot, chatID, msgID, r.cfg.Telegram.StreamEditIntervalMs)
+				mu.Unlock()
+				return
+			}
+			buf := streamBuffer
+			mu.Unlock()
+
+			if buf != nil {
+				buf.Append(delta)
+			}
 		},
 		OnError: func(err error) {
-			streamBuffer.Append(fmt.Sprintf("\n\n❌ [Error]: %v", err))
+			mu.Lock()
+			buf := streamBuffer
+			mu.Unlock()
+			if buf != nil {
+				buf.Append(fmt.Sprintf("\n\n❌ [Error]: %v", err))
+			}
 		},
 	}
 
 	result, err := r.streamRunner.RunStream(ctx, opts, callbacks)
+
+	// Ensure temporary activity badge is removed when generation completes
+	activityTracker.Delete()
 
 	footer := ""
 	finalText := ""
@@ -681,12 +703,42 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 		finalText = fmt.Sprintf("❌ Terjadi kesalahan:\n%s", err.Error())
 	}
 
-	historyMu.Lock()
-	doneActions := make([]string, len(recentHistory))
-	copy(doneActions, recentHistory)
-	historyMu.Unlock()
+	mu.Lock()
+	started := responseStarted
+	savedBuffer := streamBuffer
+	actions := make([]string, len(recentActions))
+	copy(actions, recentActions)
+	mu.Unlock()
 
-	streamBuffer.Finalize(finalText, footer, doneActions)
+	if started && savedBuffer != nil {
+		savedBuffer.Finalize(finalText, footer, actions)
+	} else {
+		text := finalText
+		if text == "" {
+			if len(actions) > 0 {
+				var sb strings.Builder
+				sb.WriteString("✅ <b>Tugas selesai dieksekusi.</b>\n\n<i>Ringkasan:</i>\n")
+				for _, a := range actions {
+					sb.WriteString(fmt.Sprintf("• %s\n", a))
+				}
+				text = sb.String()
+			} else {
+				text = "✅ <b>Tugas selesai.</b>"
+			}
+		}
+		formatted := renderer.FormatMarkdownForTelegram(text)
+		if footer != "" {
+			formatted = formatted + "\n\n" + footer
+		}
+		msg := tgbotapi.NewMessage(chatID, formatted)
+		msg.ParseMode = "HTML"
+		_, sendErr := r.bot.Send(msg)
+		if sendErr != nil {
+			plain := renderer.StripHTML(formatted)
+			msgPlain := tgbotapi.NewMessage(chatID, plain)
+			_, _ = r.bot.Send(msgPlain)
+		}
+	}
 }
 
 func (r *Router) handleListDir(chatID int64, targetPath string) {
