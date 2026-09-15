@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-
 	"agy-tele/config"
 	"agy-tele/internal/engine"
+	"agy-tele/internal/renderer"
 	"agy-tele/internal/session"
 	"agy-tele/internal/throttler"
 
@@ -124,7 +124,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 	case "/model":
 		if args != "" {
 			r.sm.SetModel(userID, args)
-			r.sendText(chatID, fmt.Sprintf("✅ Active model diatur ke: <code>%s</code>", args))
+			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Active model diatur ke: <code>%s</code>", args))
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = CloseOnlyKeyboard()
+			_, _ = r.bot.Send(reply)
 		} else {
 			active := sess.ActiveModel
 			if active == "" {
@@ -141,7 +144,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			effort := strings.ToLower(args)
 			if effort == "low" || effort == "medium" || effort == "high" {
 				r.sm.SetEffort(userID, effort)
-				r.sendText(chatID, fmt.Sprintf("✅ Reasoning effort diatur ke: <b>%s</b>", effort))
+				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Reasoning effort diatur ke: <b>%s</b>", effort))
+				reply.ParseMode = "HTML"
+				reply.ReplyMarkup = CloseOnlyKeyboard()
+				_, _ = r.bot.Send(reply)
 			} else {
 				r.sendText(chatID, "Pilihan effort valid: <code>low</code>, <code>medium</code>, atau <code>high</code>.")
 			}
@@ -161,7 +167,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			mode := strings.ToLower(args)
 			if mode == "auto" || mode == "ask" {
 				r.sm.SetPermissionMode(userID, mode)
-				r.sendText(chatID, fmt.Sprintf("✅ Mode permission diatur ke: <b>%s</b>", mode))
+				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Mode permission diatur ke: <b>%s</b>", mode))
+				reply.ParseMode = "HTML"
+				reply.ReplyMarkup = CloseOnlyKeyboard()
+				_, _ = r.bot.Send(reply)
 			} else {
 				r.sendText(chatID, "Pilihan valid: <code>/permission auto</code> atau <code>/permission ask</code>")
 			}
@@ -185,13 +194,22 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 				return
 			}
 			r.sm.UpdateCWD(userID, newPath)
-			r.sendText(chatID, fmt.Sprintf("📁 Workspace CWD berhasil diubah ke:\n<code>%s</code>", newPath))
+			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 Workspace CWD berhasil diubah ke:\n<code>%s</code>", newPath))
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = CloseOnlyKeyboard()
+			_, _ = r.bot.Send(reply)
 		} else {
-			r.sendText(chatID, fmt.Sprintf("📁 <b>Direktori Kerja Saat Ini:</b>\n<code>%s</code>\n\nGunakan <code>/cwd &lt;path&gt;</code> untuk berpindah folder.", sess.CWD))
+			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 <b>Direktori Kerja Saat Ini:</b>\n<code>%s</code>\n\nGunakan <code>/cwd &lt;path&gt;</code> untuk berpindah folder.", sess.CWD))
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = CloseOnlyKeyboard()
+			_, _ = r.bot.Send(reply)
 		}
 
 	case "/pwd":
-		r.sendText(chatID, fmt.Sprintf("📁 <b>Current Working Directory:</b>\n<code>%s</code>", sess.CWD))
+		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 <b>Current Working Directory:</b>\n<code>%s</code>", sess.CWD))
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = CloseOnlyKeyboard()
+		_, _ = r.bot.Send(reply)
 
 	case "/ls":
 		targetPath := sess.CWD
@@ -212,7 +230,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			}
 		}
 		r.sm.ResetConversation(userID)
-		r.sendText(chatID, fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nSiap memulai sesi percakapan baru di workspace:\n<code>%s</code>", sess.CWD))
+		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nSiap memulai sesi percakapan baru di workspace:\n<code>%s</code>", sess.CWD))
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = CloseOnlyKeyboard()
+		_, _ = r.bot.Send(reply)
 
 	case "/continue":
 		r.sendText(chatID, "⏳ Melanjutkan sesi percakapan sebelumnya...")
@@ -227,7 +248,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		})
 
 	case "/sessions":
-		r.sendText(chatID, FormatSessions(sess.RecentConversations, sess.ActiveConversationID))
+		reply := tgbotapi.NewMessage(chatID, FormatSessions(sess.RecentConversations, sess.ActiveConversationID))
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = CloseOnlyKeyboard()
+		_, _ = r.bot.Send(reply)
 
 	case "/switch":
 		if args == "" {
@@ -235,7 +259,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			return
 		}
 		r.sm.UpdateConversation(userID, args, "")
-		r.sendText(chatID, fmt.Sprintf("✅ Berhasil berpindah ke sesi: <code>%s</code>", args))
+		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Berhasil berpindah ke sesi: <code>%s</code>", args))
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = CloseOnlyKeyboard()
+		_, _ = r.bot.Send(reply)
 
 	case "/cancel", "/stop":
 		if r.streamRunner.CancelActive(userID) {
@@ -304,6 +331,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	data := cb.Data
 	userID := cb.From.ID
 	chatID := cb.Message.Chat.ID
+	msgID := cb.Message.MessageID
 
 	// Answer callback to remove loading clock
 	callbackResp := tgbotapi.NewCallback(cb.ID, "")
@@ -316,34 +344,47 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	sess := r.sm.GetSession(userID, chatID)
 
 	switch {
+	case data == "cmd_delete_msg":
+		delMsg := tgbotapi.NewDeleteMessage(chatID, msgID)
+		_, _ = r.bot.Request(delMsg)
+
 	case data == "cmd_help_menu":
-		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, FormatHelp())
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatHelp())
 		edit.ParseMode = "HTML"
 		kb := QuickActionKeyboard()
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_usage":
-		r.executeOneShot(chatID, sess.CWD, "📊 Model Quota & Limit", "/usage")
+		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "📊 Model Quota & Limit", "/usage", "cmd_usage")
 
 	case data == "cmd_credits":
-		r.executeOneShot(chatID, sess.CWD, "💰 G1 Credits", "/credits")
+		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "💰 G1 Credits", "/credits", "cmd_credits")
 
 	case data == "cmd_skills":
-		r.executeOneShot(chatID, sess.CWD, "🧰 Available Skills", "/skills")
+		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "🧰 Available Skills", "/skills", "cmd_skills")
 
 	case data == "cmd_status":
-		reply := tgbotapi.NewMessage(chatID, FormatStatus(sess, false))
-		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = QuickActionKeyboard()
-		_, _ = r.bot.Send(reply)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatStatus(sess, false))
+		edit.ParseMode = "HTML"
+		kb := QuickActionKeyboard()
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_new":
 		r.sm.ResetConversation(userID)
-		r.sendText(chatID, fmt.Sprintf("🔄 Sesi percakapan direset.\nWorkspace aktif: <code>%s</code>", sess.CWD))
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nWorkspace aktif: <code>%s</code>", sess.CWD))
+		edit.ParseMode = "HTML"
+		kb := BackAndCloseKeyboard("cmd_help_menu")
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_model_menu":
-		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "🧠 <b>Pilih Model Antigravity:</b>")
+		active := sess.ActiveModel
+		if active == "" {
+			active = "(Default agy)"
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("🧠 <b>Pilih Model Antigravity:</b>\nModel aktif saat ini: <code>%s</code>", active))
 		edit.ParseMode = "HTML"
 		kb := ModelSelectionKeyboard()
 		edit.ReplyMarkup = &kb
@@ -352,10 +393,18 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	case strings.HasPrefix(data, "set_model:"):
 		modelName := strings.TrimPrefix(data, "set_model:")
 		r.sm.SetModel(userID, modelName)
-		r.sendText(chatID, fmt.Sprintf("✅ Active model diatur ke: <code>%s</code>", modelName))
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Active model diatur ke:</b>\n<code>%s</code>", modelName))
+		edit.ParseMode = "HTML"
+		kb := BackAndCloseKeyboard("cmd_model_menu")
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_effort_menu":
-		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "⚡ <b>Pilih Reasoning Effort:</b>")
+		active := sess.ActiveEffort
+		if active == "" {
+			active = "(Default agy)"
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("⚡ <b>Pilih Reasoning Effort:</b>\nEffort aktif saat ini: <b>%s</b>", active))
 		edit.ParseMode = "HTML"
 		kb := EffortSelectionKeyboard()
 		edit.ReplyMarkup = &kb
@@ -364,10 +413,14 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	case strings.HasPrefix(data, "set_effort:"):
 		effort := strings.TrimPrefix(data, "set_effort:")
 		r.sm.SetEffort(userID, effort)
-		r.sendText(chatID, fmt.Sprintf("✅ Reasoning effort diatur ke: <b>%s</b>", effort))
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Reasoning effort diatur ke:</b>\n<b>%s</b>", effort))
+		edit.ParseMode = "HTML"
+		kb := BackAndCloseKeyboard("cmd_effort_menu")
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_perm_menu":
-		edit := tgbotapi.NewEditMessageText(chatID, cb.Message.MessageID, "🔒 <b>Pilih Mode Persetujuan Tools:</b>")
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("🔒 <b>Pilih Mode Persetujuan Tools:</b>\nSaat ini: <b>%s</b>\n\n• <b>Auto-Approve</b>: Aksi disetujui otomatis tanpa menunggu.\n• <b>Ask User</b>: Konfirmasi manual tiap aksi.", sess.PermissionMode))
 		edit.ParseMode = "HTML"
 		kb := PermissionSelectionKeyboard()
 		edit.ReplyMarkup = &kb
@@ -376,7 +429,11 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	case strings.HasPrefix(data, "set_perm:"):
 		mode := strings.TrimPrefix(data, "set_perm:")
 		r.sm.SetPermissionMode(userID, mode)
-		r.sendText(chatID, fmt.Sprintf("✅ Mode permission diatur ke: <b>%s</b>", mode))
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Mode permission diatur ke:</b>\n<b>%s</b>", mode))
+		edit.ParseMode = "HTML"
+		kb := BackAndCloseKeyboard("cmd_perm_menu")
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
 	}
 }
 
@@ -388,9 +445,11 @@ func (r *Router) executeOneShot(chatID int64, cwd string, title string, command 
 	}
 
 	out, err := r.oneShot.Run(ctx, cwd, command)
+	kb := CloseOnlyKeyboard()
 	if err != nil {
-		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, fmt.Sprintf("❌ Error menjalankan <code>%s</code>:\n<pre>%s</pre>", command, EscapeHTML(err.Error())))
+		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, fmt.Sprintf("❌ Error menjalankan <code>%s</code>:\n<pre>%s</pre>", command, renderer.EscapeHTML(err.Error())))
 		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 		return
 	}
@@ -401,6 +460,33 @@ func (r *Router) executeOneShot(chatID int64, cwd string, title string, command 
 
 	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, FormatCodeBlock(title, out))
 	edit.ParseMode = "HTML"
+	edit.ReplyMarkup = &kb
+	_, _ = r.bot.Send(edit)
+}
+
+func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, title string, command string, refreshCmd string) {
+	ctx := context.Background()
+	loadingEdit := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("⏳ Menjalankan <code>%s</code>...", command))
+	loadingEdit.ParseMode = "HTML"
+	_, _ = r.bot.Send(loadingEdit)
+
+	out, err := r.oneShot.Run(ctx, cwd, command)
+	kb := RefreshAndBackKeyboard(refreshCmd, "cmd_help_menu")
+	if err != nil {
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("❌ Error menjalankan <code>%s</code>:\n<pre>%s</pre>", command, renderer.EscapeHTML(err.Error())))
+		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+		return
+	}
+
+	if out == "" {
+		out = "(Output kosong)"
+	}
+
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, FormatCodeBlock(title, out))
+	edit.ParseMode = "HTML"
+	edit.ReplyMarkup = &kb
 	_, _ = r.bot.Send(edit)
 }
 
@@ -486,7 +572,10 @@ func (r *Router) handleListDir(chatID int64, targetPath string) {
 		sb.WriteString("<i>(Direktori kosong)</i>\n")
 	}
 
-	r.sendText(chatID, sb.String())
+	reply := tgbotapi.NewMessage(chatID, sb.String())
+	reply.ParseMode = "HTML"
+	reply.ReplyMarkup = CloseOnlyKeyboard()
+	_, _ = r.bot.Send(reply)
 }
 
 func (r *Router) handleSendFile(chatID int64, filePath string) {

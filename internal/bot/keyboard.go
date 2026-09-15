@@ -22,6 +22,9 @@ func QuickActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("🔄 Sesi Baru", "cmd_new"),
 			tgbotapi.NewInlineKeyboardButtonData("🔒 Atur Permission", "cmd_perm_menu"),
 		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Menu", "cmd_delete_msg"),
+		),
 	)
 }
 
@@ -46,7 +49,8 @@ func ModelSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("GPT-OSS 120B (Medium)", "set_model:gpt-oss-120b-medium"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali ke Menu", "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("« Kembali", "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
 		),
 	)
 }
@@ -59,7 +63,8 @@ func EffortSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("High (Mendalam)", "set_effort:high"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali ke Menu", "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("« Kembali", "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
 		),
 	)
 }
@@ -73,7 +78,38 @@ func PermissionSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("🟡 Ask User (Konfirmasi Tiap Aksi)", "set_perm:ask"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali ke Menu", "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("« Kembali", "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+		),
+	)
+}
+
+func BackAndCloseKeyboard(backCmd string) tgbotapi.InlineKeyboardMarkup {
+	if backCmd == "" {
+		backCmd = "cmd_help_menu"
+	}
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("« Kembali ke Menu", backCmd),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+		),
+	)
+}
+
+func CloseOnlyKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Pesan Ini", "cmd_delete_msg"),
+		),
+	)
+}
+
+func RefreshAndBackKeyboard(refreshCmd string, backCmd string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔄 Refresh", refreshCmd),
+			tgbotapi.NewInlineKeyboardButtonData("« Kembali", backCmd),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
 		),
 	)
 }
