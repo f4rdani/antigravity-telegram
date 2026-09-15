@@ -9,9 +9,11 @@ import (
 	"agy-tele/internal/session"
 )
 
+const AppVersion = "v1.0.5"
+
 func FormatHelp() string {
 	var sb strings.Builder
-	sb.WriteString("🤖 <b>Antigravity CLI Remote Bridge (agy-tele)</b>\n\n")
+	sb.WriteString("🤖 <b>Antigravity CLI Remote Bridge (" + AppVersion + ")</b>\n\n")
 	sb.WriteString("<b>⚡ Agent Execution (Mode B):</b>\n")
 	sb.WriteString("• Kirim teks biasa untuk prompt / coding agent\n")
 	sb.WriteString("• <code>/resume</code> — Pilih dan lanjutkan sesi percakapan sebelumnya\n")
@@ -141,9 +143,7 @@ func FormatResultFooter(res *engine.ResultPayload) string {
 		parts = append(parts, fmt.Sprintf("🆔 %s", res.ConversationID[:8]))
 	}
 
-	if len(parts) == 0 {
-		return ""
-	}
+	parts = append(parts, fmt.Sprintf("🏷️ %s", AppVersion))
 	return "<i>(" + strings.Join(parts, " • ") + ")</i>"
 }
 
