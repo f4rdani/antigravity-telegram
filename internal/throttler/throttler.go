@@ -1,16 +1,14 @@
 package throttler
 
 import (
-
 	"strings"
 	"sync"
 	"time"
 
+	"agy-tele/internal/renderer"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
-
-type EditFunc func(chatID int64, messageID int, text string) error
-type SendFunc func(chatID int64, text string) (int, error)
 
 type MessageThrottler struct {
 	mu            sync.Mutex
@@ -84,29 +82,29 @@ func (t *MessageThrottler) flushInternal() {
 		return
 	}
 
-	// Telegram max text length is 4096
-	// If text exceeds 3900 chars, chunk it
+	formatted := renderer.FormatMarkdownForTelegram(fullText)
 	const maxChars = 3900
-	if len(fullText) <= maxChars {
-		editMsg := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, fullText)
+
+	if len(formatted) <= maxChars {
+		editMsg := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, formatted)
+		editMsg.ParseMode = "HTML"
 		_, err := t.bot.Send(editMsg)
-		if err != nil {
-			// Ignore "message is not modified" error
-			if !strings.Contains(err.Error(), "message is not modified") {
-				// Retry with plain formatting or continue
-			}
+		if err != nil && !strings.Contains(err.Error(), "message is not modified") {
+			// Fallback: send as plain text without HTML parse mode
+			plain := renderer.StripHTML(formatted)
+			editPlain := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, plain)
+			_, _ = t.bot.Send(editPlain)
 		}
 	} else {
-		// Divide into chunks
-		chunks := splitIntoChunks(fullText, maxChars)
+		chunks := splitIntoChunks(formatted, maxChars)
 		if len(chunks) > 0 {
-			// Edit the first chunk into currentMsgID
 			editMsg := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, chunks[0])
-			_, _ = t.bot.Send(editMsg)
-
-			// Send subsequent chunks as new messages if not already sent
-			// In practice, during streaming we edit the active latest chunk
-			// For simplicity and stability, we display the tail or chunked text
+			editMsg.ParseMode = "HTML"
+			_, err := t.bot.Send(editMsg)
+			if err != nil && !strings.Contains(err.Error(), "message is not modified") {
+				editPlain := tgbotapi.NewEditMessageText(t.chatID, currentMsgID, renderer.StripHTML(chunks[0]))
+				_, _ = t.bot.Send(editPlain)
+			}
 		}
 	}
 }
@@ -147,23 +145,40 @@ func (t *MessageThrottler) Finalize(finalText string, footer string) {
 		text = "(Empty response)"
 	}
 
+	formatted := renderer.FormatMarkdownForTelegram(text)
 	if footer != "" {
-		text = text + "\n\n" + footer
+		formatted = formatted + "\n\n" + footer
 	}
 
 	const maxChars = 3900
-	if len(text) <= maxChars {
-		editMsg := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, text)
-		_, _ = t.bot.Send(editMsg)
+	if len(formatted) <= maxChars {
+		editMsg := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, formatted)
+		editMsg.ParseMode = "HTML"
+		_, err := t.bot.Send(editMsg)
+		if err != nil {
+			plainText := renderer.StripHTML(formatted)
+			editPlain := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, plainText)
+			_, _ = t.bot.Send(editPlain)
+		}
 	} else {
-		chunks := splitIntoChunks(text, maxChars)
+		chunks := splitIntoChunks(formatted, maxChars)
 		for i, ch := range chunks {
 			if i == 0 {
 				editMsg := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, ch)
-				_, _ = t.bot.Send(editMsg)
+				editMsg.ParseMode = "HTML"
+				_, err := t.bot.Send(editMsg)
+				if err != nil {
+					editPlain := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, renderer.StripHTML(ch))
+					_, _ = t.bot.Send(editPlain)
+				}
 			} else {
 				newMsg := tgbotapi.NewMessage(t.chatID, ch)
-				_, _ = t.bot.Send(newMsg)
+				newMsg.ParseMode = "HTML"
+				_, err := t.bot.Send(newMsg)
+				if err != nil {
+					newPlain := tgbotapi.NewMessage(t.chatID, renderer.StripHTML(ch))
+					_, _ = t.bot.Send(newPlain)
+				}
 			}
 		}
 	}

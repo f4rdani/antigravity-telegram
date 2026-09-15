@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"agy-tele/internal/engine"
+	"agy-tele/internal/renderer"
 	"agy-tele/internal/session"
 )
 
@@ -137,8 +138,15 @@ func FormatResultFooter(res *engine.ResultPayload) string {
 }
 
 func EscapeHTML(s string) string {
-	s = strings.ReplaceAll(s, "&", "&amp;")
-	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
-	return s
+	return renderer.EscapeHTML(s)
 }
+
+func FormatMarkdownForTelegram(s string) string {
+	return renderer.FormatMarkdownForTelegram(s)
+}
+
+func StripHTML(s string) string {
+	return renderer.StripHTML(s)
+}
+
+
