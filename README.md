@@ -169,8 +169,8 @@ Unlike ordinary Telegram bots that flood your chat with new messages for every b
 
 ### 1. Clone & Build
 ```bash
-git clone https://github.com/YOUR_USERNAME/agy-tele.git
-cd agy-tele
+git clone https://github.com/f4rdani/antigravity-telegram.git
+cd antigravity-telegram
 go build -ldflags="-s -w" -o bin/agy-tele ./cmd/agy-tele
 ```
 
@@ -214,7 +214,7 @@ Copy `config.example.json` to `config.json`:
 ## 🐧 Production Deployment (Linux Server)
 
 ### 1. Upload Binary & Configuration
-Pre-built Linux binaries are available in [Releases](https://github.com/YOUR_USERNAME/agy-tele/releases) or can be cross-compiled with `make linux`.
+Pre-built Linux binaries are available in [Releases](https://github.com/f4rdani/antigravity-telegram/releases) or can be cross-compiled with `make linux`.
 
 ```bash
 sudo mkdir -p /opt/agy-tele
