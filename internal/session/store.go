@@ -146,7 +146,11 @@ func (sm *SessionManager) UpdateConversation(userID int64, convID string, title 
 		}
 
 		if title == "" {
-			title = "Conversation " + convID[:8]
+			if len(convID) >= 8 {
+				title = "Conversation " + convID[:8]
+			} else {
+				title = "Conversation " + convID
+			}
 		}
 
 		newEntry := ConversationEntry{

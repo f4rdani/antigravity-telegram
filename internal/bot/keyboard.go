@@ -94,6 +94,9 @@ func ModelSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("GPT-OSS 120B (Medium)", "set_model:gpt-oss-120b-medium"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🔄 Default (Otomatis agy)", "set_model:default"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("« Kembali", "cmd_help_menu"),
 			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
 		),

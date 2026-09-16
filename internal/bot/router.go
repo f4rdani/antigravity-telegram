@@ -160,11 +160,19 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 
 	case "/model":
 		if args != "" {
-			r.sm.SetModel(userID, args)
-			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Active model diatur ke: <code>%s</code>", args))
-			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = CloseOnlyKeyboard()
-			_, _ = r.bot.Send(reply)
+			if strings.ToLower(args) == "default" || strings.ToLower(args) == "reset" {
+				r.sm.SetModel(userID, "")
+				reply := tgbotapi.NewMessage(chatID, "✅ Active model direset ke <b>Default (otomatis agy)</b>.")
+				reply.ParseMode = "HTML"
+				reply.ReplyMarkup = CloseOnlyKeyboard()
+				_, _ = r.bot.Send(reply)
+			} else {
+				r.sm.SetModel(userID, args)
+				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Active model diatur ke: <code>%s</code>", args))
+				reply.ParseMode = "HTML"
+				reply.ReplyMarkup = CloseOnlyKeyboard()
+				_, _ = r.bot.Send(reply)
+			}
 		} else {
 			active := sess.ActiveModel
 			if active == "" {
@@ -669,12 +677,21 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 
 	case strings.HasPrefix(data, "set_model:"):
 		modelName := strings.TrimPrefix(data, "set_model:")
-		r.sm.SetModel(userID, modelName)
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Active model diatur ke:</b>\n<code>%s</code>", modelName))
-		edit.ParseMode = "HTML"
-		kb := BackAndCloseKeyboard("cmd_model_menu")
-		edit.ReplyMarkup = &kb
-		_, _ = r.bot.Send(edit)
+		if modelName == "default" {
+			r.sm.SetModel(userID, "")
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, "✅ <b>Active model direset ke Default (otomatis agy).</b>")
+			edit.ParseMode = "HTML"
+			kb := BackAndCloseKeyboard("cmd_model_menu")
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		} else {
+			r.sm.SetModel(userID, modelName)
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Active model diatur ke:</b>\n<code>%s</code>", modelName))
+			edit.ParseMode = "HTML"
+			kb := BackAndCloseKeyboard("cmd_model_menu")
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		}
 
 	case data == "cmd_effort_menu":
 		active := sess.ActiveEffort
@@ -872,26 +889,29 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 				responseStarted = true
 				mu.Unlock()
 
-				activityTracker.Delete()
-
-				formattedFirst := renderer.FormatMarkdownForTelegram(delta)
-				if strings.TrimSpace(formattedFirst) == "" {
-					formattedFirst = "..."
-				}
-				initResp := tgbotapi.NewMessage(chatID, formattedFirst)
-				initResp.ParseMode = "HTML"
-				sentMsg, err := r.bot.Send(initResp)
-				msgID := 0
-				if err == nil {
-					msgID = sentMsg.MessageID
-				} else {
-					// Fallback to plain text if HTML parse error
-					initPlain := tgbotapi.NewMessage(chatID, delta)
-					if sentPlain, errPlain := r.bot.Send(initPlain); errPlain == nil {
-						msgID = sentPlain.MessageID
+				msgID := activityTracker.AdoptMessageID()
+				if msgID == 0 {
+					// Fallback: send fresh message if tracker message was unavailable
+					formattedFirst := renderer.FormatMarkdownForTelegram(delta)
+					if strings.TrimSpace(formattedFirst) == "" {
+						formattedFirst = "..."
+					}
+					initResp := tgbotapi.NewMessage(chatID, formattedFirst)
+					initResp.ParseMode = "HTML"
+					sentMsg, err := r.bot.Send(initResp)
+					if err == nil {
+						msgID = sentMsg.MessageID
+					} else {
+						// Fallback to plain text if HTML parse error
+						initPlain := tgbotapi.NewMessage(chatID, delta)
+						if sentPlain, errPlain := r.bot.Send(initPlain); errPlain == nil {
+							msgID = sentPlain.MessageID
+						}
 					}
 				}
+
 				newBuf := throttler.NewMessageThrottler(r.bot, chatID, msgID, r.cfg.Telegram.StreamEditIntervalMs)
+				newBuf.Append(delta)
 
 				mu.Lock()
 				streamBuffer = newBuf
@@ -926,8 +946,16 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			lastConvID = result.ConversationID
 			r.sm.UpdateConversation(opts.UserID, lastConvID, "")
 		}
+
+		if result.Error != "" {
+			if strings.TrimSpace(finalText) == "" {
+				finalText = fmt.Sprintf("❌ <b>Terjadi kesalahan:</b>\n%s", renderer.EscapeHTML(result.Error))
+			} else {
+				finalText = fmt.Sprintf("%s\n\n⚠️ <i>Peringatan / Error: %s</i>", finalText, renderer.EscapeHTML(result.Error))
+			}
+		}
 	} else if err != nil {
-		finalText = fmt.Sprintf("❌ Terjadi kesalahan:\n%s", err.Error())
+		finalText = fmt.Sprintf("❌ <b>Terjadi kesalahan:</b>\n%s", renderer.EscapeHTML(err.Error()))
 	}
 
 	mu.Lock()

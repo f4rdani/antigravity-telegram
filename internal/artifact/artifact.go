@@ -31,8 +31,11 @@ type Item struct {
 
 func GetBrainDir() (string, error) {
 	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
+	if err != nil || home == "" {
+		home = os.Getenv("HOME")
+		if home == "" {
+			home = "/root"
+		}
 	}
 	return filepath.Join(home, ".gemini", "antigravity-cli", "brain"), nil
 }

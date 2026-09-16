@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -34,7 +35,13 @@ func (sm *SessionManager) GetAvailableConversations(userID int64) []AvailableCon
 	seen := make(map[string]bool)
 
 	homeDir, err := os.UserHomeDir()
-	if err == nil {
+	if err != nil || homeDir == "" {
+		homeDir = os.Getenv("HOME")
+		if homeDir == "" {
+			homeDir = "/root"
+		}
+	}
+	if homeDir != "" {
 		// 1. Primary Source: conversation_summaries.db from Antigravity CLI
 		dbPath := filepath.Join(homeDir, ".gemini", "antigravity-cli", "conversation_summaries.db")
 		if _, err := os.Stat(dbPath); err == nil {
@@ -57,7 +64,11 @@ func (sm *SessionManager) GetAvailableConversations(userID int64) []AvailableCon
 								// Parse title
 								title := strings.TrimSpace(preview)
 								if title == "" {
-									title = "Percakapan " + id[:8]
+									if len(id) >= 8 {
+										title = "Percakapan " + id[:8]
+									} else {
+										title = "Percakapan " + id
+									}
 								}
 								runes := []rune(title)
 								if len(runes) > 32 {
@@ -124,8 +135,12 @@ func cleanWorkspaceURI(raw string) string {
 	if err := json.Unmarshal([]byte(raw), &uris); err == nil && len(uris) > 0 {
 		raw = uris[0]
 	}
-	raw = strings.TrimPrefix(raw, "file:///")
-	raw = strings.TrimPrefix(raw, "file://")
+	if strings.HasPrefix(raw, "file://") {
+		raw = strings.TrimPrefix(raw, "file://")
+		if runtime.GOOS != "windows" && !strings.HasPrefix(raw, "/") {
+			raw = "/" + raw
+		}
+	}
 
 	// Decode URL-encoded characters (like %20 -> space)
 	if decoded, err := url.PathUnescape(raw); err == nil {

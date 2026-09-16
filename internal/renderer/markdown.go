@@ -8,9 +8,11 @@ import (
 
 var (
 	reFileLink   = regexp.MustCompile(`\[([^\]]+)\]\(file:///[^\)]+\)`)
+	reWebLink    = regexp.MustCompile(`\[([^\]]+)\]\((https?://[^\s\)]+)\)`)
 	reBold       = regexp.MustCompile(`\*\*([^*]+)\*\*`)
 	reItalic     = regexp.MustCompile(`\*([^*]+)\*`)
 	reCodeInline = regexp.MustCompile("`([^`]+)`")
+	reHTMLTag    = regexp.MustCompile(`<[^>]+>`)
 )
 
 func EscapeHTML(s string) string {
@@ -62,6 +64,9 @@ func FormatMarkdownForTelegram(raw string) string {
 				return m
 			})
 
+			// Format clickable web links [label](https://...) -> <a href="https://...">label</a>
+			text = reWebLink.ReplaceAllString(text, `<a href="$2">$1</a>`)
+
 			// Inline code: `code` -> <code>code</code>
 			text = reCodeInline.ReplaceAllString(text, "<code>$1</code>")
 
@@ -95,16 +100,9 @@ func FormatMarkdownForTelegram(raw string) string {
 	return sb.String()
 }
 
-// StripHTML removes basic HTML tags as fallback when Telegram HTML parser fails
+// StripHTML removes all HTML tags as fallback when Telegram HTML parser fails
 func StripHTML(s string) string {
-	s = strings.ReplaceAll(s, "<b>", "")
-	s = strings.ReplaceAll(s, "</b>", "")
-	s = strings.ReplaceAll(s, "<i>", "")
-	s = strings.ReplaceAll(s, "</i>", "")
-	s = strings.ReplaceAll(s, "<code>", "")
-	s = strings.ReplaceAll(s, "</code>", "")
-	s = strings.ReplaceAll(s, "<pre>", "")
-	s = strings.ReplaceAll(s, "</pre>", "")
+	s = reHTMLTag.ReplaceAllString(s, "")
 	s = strings.ReplaceAll(s, "&amp;", "&")
 	s = strings.ReplaceAll(s, "&lt;", "<")
 	s = strings.ReplaceAll(s, "&gt;", ">")

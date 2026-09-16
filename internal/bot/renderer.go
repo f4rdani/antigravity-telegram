@@ -202,7 +202,11 @@ func FormatResultFooter(res *engine.ResultPayload) string {
 		parts = append(parts, fmt.Sprintf("🔄 Turn %d", res.NumTurns))
 	}
 	if res.ConversationID != "" {
-		parts = append(parts, fmt.Sprintf("🆔 %s", res.ConversationID[:8]))
+		convID := res.ConversationID
+		if len(convID) > 8 {
+			convID = convID[:8]
+		}
+		parts = append(parts, fmt.Sprintf("🆔 %s", convID))
 	}
 
 	parts = append(parts, fmt.Sprintf("🏷️ %s", AppVersion))

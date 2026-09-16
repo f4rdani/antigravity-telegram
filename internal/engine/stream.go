@@ -82,6 +82,7 @@ func (r *StreamAgentRunner) RunStream(ctx context.Context, opts StreamRunOptions
 	}
 
 	cmd := exec.CommandContext(ctx, r.binaryPath, args...)
+	cmd.Env = GetCommandEnv()
 	if opts.CWD != "" {
 		cmd.Dir = opts.CWD
 	}

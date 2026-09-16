@@ -25,6 +25,7 @@ func (r *OneShotRunner) Run(ctx context.Context, cwd string, command string) (st
 	defer cancel()
 
 	cmd := exec.CommandContext(ctxTimeout, r.binaryPath, "-p", command)
+	cmd.Env = GetCommandEnv()
 	if cwd != "" {
 		cmd.Dir = cwd
 	}

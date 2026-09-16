@@ -144,6 +144,26 @@ func (a *ActivityTracker) Delete() {
 	}()
 }
 
+// AdoptMessageID stops the tracker loop without deleting the message and returns the message ID for in-place updates
+func (a *ActivityTracker) AdoptMessageID() int {
+	a.mu.Lock()
+	if a.closed || a.messageID == 0 {
+		a.mu.Unlock()
+		return 0
+	}
+	a.closed = true
+	msgID := a.messageID
+	a.messageID = 0
+	close(a.stopCh)
+	a.mu.Unlock()
+
+	select {
+	case <-a.doneCh:
+	case <-time.After(500 * time.Millisecond):
+	}
+	return msgID
+}
+
 // MessageID returns the current message ID or 0 if closed/deleted
 func (a *ActivityTracker) MessageID() int {
 	a.mu.Lock()

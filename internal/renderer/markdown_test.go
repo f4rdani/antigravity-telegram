@@ -38,4 +38,20 @@ func TestFormatMarkdownForTelegram(t *testing.T) {
 	if strings.Contains(gotFileLink, "file:///") {
 		t.Errorf("FormatMarkdownForTelegram() still contains raw file link: %s", gotFileLink)
 	}
+
+	// Test web link conversion
+	webLinkInput := "Visit [Dashboard](https://status.miniapp.web.id) for details."
+	gotWebLink := FormatMarkdownForTelegram(webLinkInput)
+	if !strings.Contains(gotWebLink, `<a href="https://status.miniapp.web.id">Dashboard</a>`) {
+		t.Errorf("FormatMarkdownForTelegram() failed to format web link: %s", gotWebLink)
+	}
+}
+
+func TestStripHTML(t *testing.T) {
+	input := `<pre><code class="language-go">fmt.Println("hello")</code></pre> and <b>bold</b>`
+	expected := `fmt.Println("hello") and bold`
+	got := StripHTML(input)
+	if got != expected {
+		t.Errorf("StripHTML() = %q, want %q", got, expected)
+	}
 }
