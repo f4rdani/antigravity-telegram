@@ -205,3 +205,14 @@ func ArtifactDetailKeyboard(item artifact.Item) tgbotapi.InlineKeyboardMarkup {
 		),
 	)
 }
+
+func ActiveTaskKeyboard() tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🛑 Hentikan Tugas Aktif", "cmd_cancel_active_task"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Pemberitahuan", "cmd_delete_msg"),
+		),
+	)
+}

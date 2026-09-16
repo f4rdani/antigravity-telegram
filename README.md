@@ -49,6 +49,10 @@ Running autonomous coding sessions or monitoring long-running agent tasks (`/pla
 - **Dual-Engine Execution**:
   - **Mode A (Fast CLI Inspection)**: Instant one-shot execution for `/usage`, `/credits`, `/skills`, `/model`, `/effort`, `/agents`, `/changelog` (<100ms return).
   - **Mode B (Stream-JSON Agent Engine)**: Continuous multi-turn coding agent, `/plan <task>`, `/goal <task>`, and skill execution with `--conversation <id>` context retention.
+- **Autonomous Multi-Turn `/goal` Engine**: Executes end-to-end autonomous goals without stopping until `<!-- GOAL_COMPLETE -->` is emitted, seamlessly chaining iterations without requiring manual "Continue" prompts.
+- **Concurrency & Busy-Task Protection**: Guards against race conditions and API 503 errors when multiple prompts are sent in quick succession. Displays a live status card with an instant `[ 🛑 Hentikan Tugas Aktif ]` cancellation button.
+- **Unlimited Execution Watchdog (`--print-timeout 24h`)**: Eliminates the default 5m0s CLI watchdog cutoff, allowing long-running background tasks, deep reasoning, subagents, and builds to run reliably until completion.
+- **Clean Process-Group Termination**: Canceling a task (`/cancel` or inline button) cleanly terminates the entire process group (SIGKILL) on Linux, ensuring no orphan child tools remain running.
 - **Multimodal File & Photo Uploads**: Send photos, documents, code files, or logs directly through Telegram. They are automatically saved into the active workspace and analyzed by the agent with your custom caption.
 - **Interactive Artifact Review (`/artifact`)**: Inspect generated architecture designs, specs, and plan documents directly inside Telegram with inline pagination, full previews, and instant document downloads.
 - **Rich Markdown & Table Rendering**:
@@ -300,6 +304,7 @@ Configuration can be supplied via `config.json` or Environment Variables:
 | `agy.binary_path` | `AGY_BINARY_PATH` | `"agy"` | Path to Antigravity CLI executable |
 | `agy.default_workspace` | `AGY_DEFAULT_WORKSPACE` | `"auto"` | Default root directory (`/` on Linux, `C:\` on Windows) |
 | `agy.permission_mode` | `AGY_PERMISSION_MODE` | `"auto"` | Tool permissions mode (`auto` or `ask`) |
+| `agy.print_timeout` | `AGY_PRINT_TIMEOUT` | `"24h"` | Stream execution timeout duration (e.g. `"24h"`) |
 | `storage.session_file` | `STORAGE_SESSION_FILE` | `"./sessions.json"` | Path to session storage file |
 
 ---

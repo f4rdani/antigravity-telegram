@@ -23,6 +23,7 @@ type AgyConfig struct {
 	PermissionMode   string `json:"permission_mode"` // "auto" or "ask"
 	DefaultModel     string `json:"default_model"`
 	DefaultEffort    string `json:"default_effort"`
+	PrintTimeout     string `json:"print_timeout"` // e.g. "24h", prevents premature 5m0s timeout
 }
 
 type StorageConfig struct {
@@ -59,6 +60,7 @@ func DefaultConfig() *Config {
 			PermissionMode:   "auto", // default auto-approve for hands-free remote usage
 			DefaultModel:     "",
 			DefaultEffort:    "",
+			PrintTimeout:     "24h",
 		},
 		Storage: StorageConfig{
 			SessionFile: "./sessions.json",
@@ -101,6 +103,12 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if perm := os.Getenv("AGY_PERMISSION_MODE"); perm != "" {
 		cfg.Agy.PermissionMode = perm
+	}
+	if timeout := os.Getenv("AGY_PRINT_TIMEOUT"); timeout != "" {
+		cfg.Agy.PrintTimeout = timeout
+	}
+	if cfg.Agy.PrintTimeout == "" {
+		cfg.Agy.PrintTimeout = "24h"
 	}
 
 	// Validate / normalize workspace

@@ -10,7 +10,7 @@ import (
 	"agy-tele/internal/session"
 )
 
-const AppVersion = "v1.0.7"
+const AppVersion = "v1.0.8"
 
 func FormatHelp() string {
 	var sb strings.Builder
@@ -47,10 +47,13 @@ func FormatHelp() string {
 	return sb.String()
 }
 
-func FormatStatus(sess *session.UserSession, isRunning bool) string {
+func FormatStatus(sess *session.UserSession, isRunning bool, activeTaskDesc string) string {
 	stateStr := "🟢 IDLE (Siap)"
 	if isRunning {
-		stateStr = "🔄 SEDANG BERJALAN..."
+		stateStr = "🔄 SEDANG MEMPROSES TUGAS..."
+		if activeTaskDesc != "" {
+			stateStr += fmt.Sprintf("\n  └ <i>\"%s\"</i>", EscapeHTML(activeTaskDesc))
+		}
 	}
 
 	permStr := "🟢 Auto-Approve (Hands-free)"
@@ -362,6 +365,15 @@ func DescribeStepAction(step *engine.StepUpdatePayload) string {
 
 		case "invoke_subagent":
 			return "🤖 <b>Memanggil subagent...</b>"
+
+		case "schedule":
+			dur := ""
+			if v, ok := params["DurationSeconds"].(string); ok && v != "" {
+				dur = fmt.Sprintf(" (%ss)", v)
+			} else if v, ok := params["DurationSeconds"].(float64); ok && v > 0 {
+				dur = fmt.Sprintf(" (%.0fs)", v)
+			}
+			return fmt.Sprintf("⏱️ <b>Menunggu latar belakang/timer%s...</b>", dur)
 
 		default:
 			if v, ok := params["toolAction"].(string); ok && v != "" {

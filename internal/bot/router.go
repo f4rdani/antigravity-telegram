@@ -19,12 +19,23 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+type ActiveTask struct {
+	UserID    int64
+	ChatID    int64
+	Prompt    string
+	StartedAt time.Time
+	Cancel    context.CancelFunc
+	IsGoal    bool
+}
+
 type Router struct {
 	cfg          *config.Config
 	bot          *tgbotapi.BotAPI
 	sm           *session.SessionManager
 	oneShot      *engine.OneShotRunner
 	streamRunner *engine.StreamAgentRunner
+	taskMu       sync.Mutex
+	activeTasks  map[int64]*ActiveTask
 }
 
 func NewRouter(cfg *config.Config, bot *tgbotapi.BotAPI, sm *session.SessionManager) *Router {
@@ -34,7 +45,50 @@ func NewRouter(cfg *config.Config, bot *tgbotapi.BotAPI, sm *session.SessionMana
 		sm:           sm,
 		oneShot:      engine.NewOneShotRunner(cfg.Agy.BinaryPath),
 		streamRunner: engine.NewStreamAgentRunner(cfg.Agy.BinaryPath),
+		activeTasks:  make(map[int64]*ActiveTask),
 	}
+}
+
+func (r *Router) getActiveTask(userID int64) *ActiveTask {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	return r.activeTasks[userID]
+}
+
+func (r *Router) registerActiveTask(userID, chatID int64, prompt string, cancel context.CancelFunc, isGoal bool) *ActiveTask {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	task := &ActiveTask{
+		UserID:    userID,
+		ChatID:    chatID,
+		Prompt:    prompt,
+		StartedAt: time.Now(),
+		Cancel:    cancel,
+		IsGoal:    isGoal,
+	}
+	r.activeTasks[userID] = task
+	return task
+}
+
+func (r *Router) unregisterActiveTask(userID int64) {
+	r.taskMu.Lock()
+	defer r.taskMu.Unlock()
+	delete(r.activeTasks, userID)
+}
+
+func (r *Router) cancelActiveTask(userID int64, chatID int64) bool {
+	r.taskMu.Lock()
+	task, ok := r.activeTasks[userID]
+	if ok && task != nil {
+		if task.Cancel != nil {
+			task.Cancel()
+		}
+		delete(r.activeTasks, userID)
+	}
+	r.taskMu.Unlock()
+
+	killed := r.streamRunner.CancelActive(userID)
+	return ok || killed
 }
 
 func (r *Router) HandleUpdate(update tgbotapi.Update) {
@@ -62,6 +116,51 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 	}
 
 	sess := r.sm.GetSession(userID, chatID)
+
+	text := strings.TrimSpace(msg.Text)
+
+	// Immediate /cancel or /stop interceptor (always allowed even if a task is running)
+	if text != "" && (strings.EqualFold(text, "/cancel") || strings.EqualFold(text, "/stop")) {
+		if r.cancelActiveTask(userID, chatID) {
+			r.sendText(chatID, "🛑 <b>Proses aktif berhasil dihentikan!</b>")
+		} else {
+			r.sendText(chatID, "ℹ️ Tidak ada proses yang sedang aktif berjalan.")
+		}
+		return
+	}
+
+	// Concurrency Guard: prevent duplicate concurrent agy processes for the same user
+	if task := r.getActiveTask(userID); task != nil {
+		// Allow /status to inspect ongoing progress
+		if text != "" && strings.HasPrefix(strings.ToLower(text), "/status") {
+			dur := time.Since(task.StartedAt).Round(time.Second)
+			promptDesc := fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
+			reply := tgbotapi.NewMessage(chatID, FormatStatus(sess, true, promptDesc))
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = QuickActionKeyboard()
+			_, _ = r.bot.Send(reply)
+			return
+		}
+
+		dur := time.Since(task.StartedAt).Round(time.Second)
+		promptSummary := task.Prompt
+		if len(promptSummary) > 50 {
+			promptSummary = promptSummary[:47] + "..."
+		}
+		warningMsg := fmt.Sprintf(
+			"⚠️ <b>Antigravity sedang aktif memproses instruksi:</b>\n"+
+				"• <i>\"%s\"</i>\n"+
+				"• <b>Durasi berjalan:</b> <code>%s</code>\n\n"+
+				"⏳ <i>Harap tunggu hingga proses selesai sebelum mengirim pesan baru, atau gunakan tombol di bawah untuk membatalkan proses yang sedang berjalan.</i>",
+			renderer.EscapeHTML(promptSummary), dur.String(),
+		)
+		reply := tgbotapi.NewMessage(chatID, warningMsg)
+		reply.ParseMode = "HTML"
+		kb := ActiveTaskKeyboard()
+		reply.ReplyMarkup = &kb
+		_, _ = r.bot.Send(reply)
+		return
+	}
 
 	// Check if message contains media/file attachments (Photo, Document, Video, Audio, Voice)
 	hasMedia := len(msg.Photo) > 0 || msg.Document != nil || msg.Video != nil || msg.Audio != nil || msg.Voice != nil
@@ -92,12 +191,12 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 				PermissionMode: sess.PermissionMode,
 				Model:          sess.ActiveModel,
 				Effort:         sess.ActiveEffort,
+				PrintTimeout:   r.cfg.Agy.PrintTimeout,
 			})
 			return
 		}
 	}
 
-	text := strings.TrimSpace(msg.Text)
 	if text == "" {
 		return
 	}
@@ -117,6 +216,7 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		PermissionMode: sess.PermissionMode,
 		Model:          sess.ActiveModel,
 		Effort:         sess.ActiveEffort,
+		PrintTimeout:   r.cfg.Agy.PrintTimeout,
 	})
 }
 
@@ -153,7 +253,14 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		r.executeOneShot(chatID, sess.CWD, "📝 Changelog", "/changelog")
 
 	case "/status":
-		reply := tgbotapi.NewMessage(chatID, FormatStatus(sess, false))
+		task := r.getActiveTask(userID)
+		isRunning := task != nil
+		taskDesc := ""
+		if isRunning {
+			dur := time.Since(task.StartedAt).Round(time.Second)
+			taskDesc = fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
+		}
+		reply := tgbotapi.NewMessage(chatID, FormatStatus(sess, isRunning, taskDesc))
 		reply.ParseMode = "HTML"
 		reply.ReplyMarkup = QuickActionKeyboard()
 		_, _ = r.bot.Send(reply)
@@ -356,6 +463,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			PermissionMode: sess.PermissionMode,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
+			PrintTimeout:   r.cfg.Agy.PrintTimeout,
 		})
 
 	case "/sessions":
@@ -366,10 +474,10 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		_, _ = r.bot.Send(reply)
 
 	case "/cancel", "/stop":
-		if r.streamRunner.CancelActive(userID) {
-			r.sendText(chatID, "🛑 Proses aktif berhasil dihentikan!")
+		if r.cancelActiveTask(userID, chatID) {
+			r.sendText(chatID, "🛑 <b>Proses aktif berhasil dihentikan!</b>")
 		} else {
-			r.sendText(chatID, "Tidak ada proses yang sedang aktif berjalan.")
+			r.sendText(chatID, "ℹ️ Tidak ada proses yang sedang aktif berjalan.")
 		}
 
 	case "/artifact", "/artifacts":
@@ -411,6 +519,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Mode:           "plan",
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
+			PrintTimeout:   r.cfg.Agy.PrintTimeout,
 		})
 
 	case "/goal":
@@ -426,6 +535,8 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			PermissionMode: sess.PermissionMode,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
+			PrintTimeout:   r.cfg.Agy.PrintTimeout,
+			IsGoal:         true,
 		})
 
 	default:
@@ -438,6 +549,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			PermissionMode: sess.PermissionMode,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
+			PrintTimeout:   r.cfg.Agy.PrintTimeout,
 		})
 	}
 }
@@ -462,6 +574,21 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	case data == "cmd_delete_msg":
 		delMsg := tgbotapi.NewDeleteMessage(chatID, msgID)
 		_, _ = r.bot.Request(delMsg)
+
+	case data == "cmd_cancel_active_task":
+		if r.cancelActiveTask(userID, chatID) {
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, "🛑 <b>Tugas aktif berhasil dihentikan.</b> Anda dapat mengirim instruksi baru sekarang.")
+			edit.ParseMode = "HTML"
+			kb := CloseOnlyKeyboard()
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		} else {
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, "ℹ️ Tidak ada proses aktif yang sedang berjalan.")
+			edit.ParseMode = "HTML"
+			kb := CloseOnlyKeyboard()
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		}
 
 	case data == "cmd_help_menu":
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatHelp())
@@ -650,7 +777,14 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "🧰 Available Skills", "/skills", "cmd_skills")
 
 	case data == "cmd_status":
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatStatus(sess, false))
+		task := r.getActiveTask(userID)
+		isRunning := task != nil
+		taskDesc := ""
+		if isRunning {
+			dur := time.Since(task.StartedAt).Round(time.Second)
+			taskDesc = fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatStatus(sess, isRunning, taskDesc))
 		edit.ParseMode = "HTML"
 		kb := QuickActionKeyboard()
 		edit.ReplyMarkup = &kb
@@ -824,6 +958,16 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	if opts.PrintTimeout == "" {
+		opts.PrintTimeout = r.cfg.Agy.PrintTimeout
+	}
+	if opts.PrintTimeout == "" {
+		opts.PrintTimeout = "24h"
+	}
+
+	r.registerActiveTask(opts.UserID, chatID, opts.Prompt, cancel, opts.IsGoal)
+	defer r.unregisterActiveTask(opts.UserID)
+
 	// Continuous typing action so user always sees "typing..." in chat header while agent works
 	stopTyping := make(chan struct{})
 	defer close(stopTyping)
@@ -841,9 +985,64 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 		}
 	}()
 
+	maxTurns := 1
+	if opts.IsGoal {
+		maxTurns = 15
+	}
+
+	iteration := 1
+	for iteration <= maxTurns {
+		if ctx.Err() != nil {
+			break
+		}
+
+		result, err := r.runSingleStreamTurn(ctx, chatID, sess, opts, iteration)
+		if ctx.Err() != nil {
+			break
+		}
+		if err != nil {
+			break
+		}
+
+		if !opts.IsGoal {
+			break
+		}
+
+		// Check if goal completed or cancelled
+		if result != nil {
+			resp := result.Response
+			if strings.Contains(resp, "<!-- GOAL_COMPLETE -->") || strings.Contains(resp, "<!-- GOAL_CANCELLED -->") {
+				break
+			}
+			if result.ConversationID != "" {
+				opts.ConversationID = result.ConversationID
+			}
+		}
+
+		iteration++
+		if iteration > maxTurns {
+			r.sendText(chatID, "ℹ️ <i>Batas maksimal iterasi /goal (15 turn) tercapai. Anda dapat mengetik /continue untuk melanjutkan jika masih diperlukan.</i>")
+			break
+		}
+
+		// Notify user that next iteration starts automatically
+		notice := fmt.Sprintf("🔄 <b>Goal belum selesai (Turn %d selesai). Melanjutkan iterasi otomatis ke-%d...</b>", iteration-1, iteration)
+		r.sendText(chatID, notice)
+
+		opts.Prompt = "Lanjutkan pengerjaan sasaran /goal hingga 100% selesai dan terverifikasi secara tuntas. Jika seluruh target telah tercapai, sertakan komentar <!-- GOAL_COMPLETE --> di akhir respon."
+	}
+}
+
+func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, iteration int) (*engine.ResultPayload, error) {
 	initialText := "💭 <i>Menganalisis instruksi...</i>"
 	if opts.Mode == "plan" {
 		initialText = "📋 <i>Menyiapkan rencana (/plan)...</i>"
+	} else if opts.IsGoal {
+		if iteration > 1 {
+			initialText = fmt.Sprintf("🎯 <i>Melanjutkan eksekusi sasaran (/goal) turn %d...</i>", iteration)
+		} else {
+			initialText = "🎯 <i>Memulai pengerjaan sasaran (/goal)...</i>"
+		}
 	}
 
 	activityTracker := throttler.NewActivityTracker(r.bot, chatID, initialText)
@@ -955,7 +1154,11 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			}
 		}
 	} else if err != nil {
-		finalText = fmt.Sprintf("❌ <b>Terjadi kesalahan:</b>\n%s", renderer.EscapeHTML(err.Error()))
+		if ctx.Err() != nil {
+			finalText = "🛑 <b>Tugas dihentikan oleh pengguna.</b>"
+		} else {
+			finalText = fmt.Sprintf("❌ <b>Terjadi kesalahan:</b>\n%s", renderer.EscapeHTML(err.Error()))
+		}
 	}
 
 	mu.Lock()
@@ -1015,6 +1218,8 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			}
 		}
 	}
+
+	return result, err
 }
 
 func (r *Router) handleListDir(chatID int64, targetPath string) {

@@ -41,6 +41,8 @@ type StreamRunOptions struct {
 	Mode           string // "plan", "accept-edits", or empty
 	Model          string
 	Effort         string
+	PrintTimeout   string // e.g. "24h", default "24h"
+	IsGoal         bool   // whether task runs in autonomous multi-turn loop
 }
 
 // CancelActive cancels any running command for the specified user
@@ -50,6 +52,7 @@ func (r *StreamAgentRunner) CancelActive(userID int64) bool {
 	r.mu.Unlock()
 
 	if ok && cmd != nil && cmd.Process != nil {
+		killProcGroup(cmd)
 		_ = cmd.Process.Kill()
 		return true
 	}
@@ -60,6 +63,13 @@ func (r *StreamAgentRunner) CancelActive(userID int64) bool {
 func (r *StreamAgentRunner) RunStream(ctx context.Context, opts StreamRunOptions, cb StreamCallbacks) (*ResultPayload, error) {
 	var args []string
 	args = append(args, "--input-format", "stream-json", "--output-format", "stream-json")
+
+	// Set long print timeout to prevent premature 5m0s timeout cutoff on background/multi-step tasks
+	timeout := opts.PrintTimeout
+	if timeout == "" {
+		timeout = "24h"
+	}
+	args = append(args, "--print-timeout", timeout)
 
 	if opts.PermissionMode == "auto" {
 		args = append(args, "--dangerously-skip-permissions")
@@ -83,6 +93,7 @@ func (r *StreamAgentRunner) RunStream(ctx context.Context, opts StreamRunOptions
 
 	cmd := exec.CommandContext(ctx, r.binaryPath, args...)
 	cmd.Env = GetCommandEnv()
+	setProcGroup(cmd)
 	if opts.CWD != "" {
 		cmd.Dir = opts.CWD
 	}
