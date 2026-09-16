@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.6] - 2026-09-16
+
+### Fixed & Improved
+- **Continuous Live Typing Status (`typing...`)**:
+  - Automatically broadcasts continuous Telegram `typing...` status every 4 seconds while Antigravity is processing, planning, calling tools, or generating output, providing immediate visual feedback in the Telegram header.
+- **Resilient Non-Blocking Activity Tracker**:
+  - Rewrote `ActivityTracker` into an actor-based architecture with an internal buffer channel and single throttled worker loop (800ms).
+  - Eliminates lock contention and `time.Sleep` deadlocks during rapid tool calls (`replace_file_content`, `run_command`, etc.).
+  - Added in-place completion fallback: transforms the activity message directly into the final result if no text deltas are streamed, completely preventing messages from being permanently stuck on `✏️ Edit(...)` badges.
+- **Robust Subprocess Stream I/O without Size Limits**:
+  - Replaced `bufio.Scanner` (which crashed with `bufio.ErrTooLong` on lines > 2MB and deadlocked the stdout pipe) with `bufio.Reader.ReadBytes('\n')` to seamlessly process arbitrary file diffs and tool output sizes.
+- **Network Resilience & Connection Timeout**:
+  - Equipped `BotAPI` with a custom `http.Client` featuring connection pooling and a 45-second timeout, preventing indefinite TCP hangs when internet disconnects and reconnects.
+
 ## [1.0.5] - 2026-09-15
 
 ### Added & Improved

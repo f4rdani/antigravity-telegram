@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"time"
 
 	"agy-tele/config"
 	"agy-tele/internal/session"
@@ -23,7 +25,17 @@ func NewBotServer(cfg *config.Config, sm *session.SessionManager) (*BotServer, e
 		return nil, fmt.Errorf("telegram bot_token is required")
 	}
 
-	bot, err := tgbotapi.NewBotAPI(cfg.Telegram.BotToken)
+	httpClient := &http.Client{
+		Timeout: 45 * time.Second,
+		Transport: &http.Transport{
+			MaxIdleConns:        100,
+			MaxIdleConnsPerHost: 20,
+			IdleConnTimeout:     90 * time.Second,
+			TLSHandshakeTimeout: 10 * time.Second,
+		},
+	}
+
+	bot, err := tgbotapi.NewBotAPIWithClient(cfg.Telegram.BotToken, tgbotapi.APIEndpoint, httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize telegram bot api: %w", err)
 	}
@@ -71,7 +83,7 @@ func NewBotServer(cfg *config.Config, sm *session.SessionManager) (*BotServer, e
 
 func (s *BotServer) Run(ctx context.Context) error {
 	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 30
+	u.Timeout = 25
 
 	updates := s.api.GetUpdatesChan(u)
 

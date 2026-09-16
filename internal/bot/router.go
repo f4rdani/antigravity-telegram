@@ -2,11 +2,12 @@ package bot
 
 import (
 	"context"
-	"sync"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"agy-tele/config"
 	"agy-tele/internal/engine"
@@ -555,6 +556,24 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 
 func (r *Router) executeOneShot(chatID int64, cwd string, title string, command string) {
 	ctx := context.Background()
+
+	// Show typing status while command is running
+	stopTyping := make(chan struct{})
+	go func() {
+		_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopTyping:
+				return
+			case <-ticker.C:
+				_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+			}
+		}
+	}()
+	defer close(stopTyping)
+
 	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("⏳ Menjalankan <code>%s</code>...", command)))
 	if err != nil {
 		return
@@ -582,6 +601,24 @@ func (r *Router) executeOneShot(chatID int64, cwd string, title string, command 
 
 func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, title string, command string, refreshCmd string) {
 	ctx := context.Background()
+
+	// Show typing status while command is running
+	stopTyping := make(chan struct{})
+	go func() {
+		_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopTyping:
+				return
+			case <-ticker.C:
+				_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+			}
+		}
+	}()
+	defer close(stopTyping)
+
 	loadingEdit := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("⏳ Menjalankan <code>%s</code>...", command))
 	loadingEdit.ParseMode = "HTML"
 	_, _ = r.bot.Send(loadingEdit)
@@ -607,7 +644,25 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 }
 
 func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions) {
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Continuous typing action so user always sees "typing..." in chat header while agent works
+	stopTyping := make(chan struct{})
+	defer close(stopTyping)
+	go func() {
+		_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopTyping:
+				return
+			case <-ticker.C:
+				_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+			}
+		}
+	}()
 
 	initialText := "💭 <i>Menganalisis instruksi...</i>"
 	if opts.Mode == "plan" {
@@ -648,23 +703,38 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			mu.Unlock()
 
 			if !isStreaming {
-				go activityTracker.Update(badge)
+				activityTracker.Update(badge)
 			}
 		},
 		OnDelta: func(delta string) {
 			mu.Lock()
 			if !responseStarted {
 				responseStarted = true
+				mu.Unlock()
+
 				activityTracker.Delete()
 
-				initResp := tgbotapi.NewMessage(chatID, delta)
+				formattedFirst := renderer.FormatMarkdownForTelegram(delta)
+				if strings.TrimSpace(formattedFirst) == "" {
+					formattedFirst = "..."
+				}
+				initResp := tgbotapi.NewMessage(chatID, formattedFirst)
 				initResp.ParseMode = "HTML"
 				sentMsg, err := r.bot.Send(initResp)
 				msgID := 0
 				if err == nil {
 					msgID = sentMsg.MessageID
+				} else {
+					// Fallback to plain text if HTML parse error
+					initPlain := tgbotapi.NewMessage(chatID, delta)
+					if sentPlain, errPlain := r.bot.Send(initPlain); errPlain == nil {
+						msgID = sentPlain.MessageID
+					}
 				}
-				streamBuffer = throttler.NewMessageThrottler(r.bot, chatID, msgID, r.cfg.Telegram.StreamEditIntervalMs)
+				newBuf := throttler.NewMessageThrottler(r.bot, chatID, msgID, r.cfg.Telegram.StreamEditIntervalMs)
+
+				mu.Lock()
+				streamBuffer = newBuf
 				mu.Unlock()
 				return
 			}
@@ -687,9 +757,6 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 
 	result, err := r.streamRunner.RunStream(ctx, opts, callbacks)
 
-	// Ensure temporary activity badge is removed when generation completes
-	activityTracker.Delete()
-
 	footer := ""
 	finalText := ""
 	if result != nil {
@@ -711,6 +778,7 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 	mu.Unlock()
 
 	if started && savedBuffer != nil {
+		activityTracker.Delete()
 		savedBuffer.Finalize(finalText, footer, actions)
 	} else {
 		text := finalText
@@ -730,13 +798,33 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 		if footer != "" {
 			formatted = formatted + "\n\n" + footer
 		}
-		msg := tgbotapi.NewMessage(chatID, formatted)
-		msg.ParseMode = "HTML"
-		_, sendErr := r.bot.Send(msg)
-		if sendErr != nil {
-			plain := renderer.StripHTML(formatted)
-			msgPlain := tgbotapi.NewMessage(chatID, plain)
-			_, _ = r.bot.Send(msgPlain)
+
+		// Edit the activity message in-place if available, transforming it directly into the final answer!
+		edited := false
+		trackerMsgID := activityTracker.MessageID()
+		if trackerMsgID != 0 {
+			edit := tgbotapi.NewEditMessageText(chatID, trackerMsgID, formatted)
+			edit.ParseMode = "HTML"
+			if _, sendErr := r.bot.Send(edit); sendErr == nil {
+				edited = true
+			} else {
+				editPlain := tgbotapi.NewEditMessageText(chatID, trackerMsgID, renderer.StripHTML(formatted))
+				if _, sendPlain := r.bot.Send(editPlain); sendPlain == nil {
+					edited = true
+				}
+			}
+		}
+
+		if !edited {
+			activityTracker.Delete()
+			msg := tgbotapi.NewMessage(chatID, formatted)
+			msg.ParseMode = "HTML"
+			_, sendErr := r.bot.Send(msg)
+			if sendErr != nil {
+				plain := renderer.StripHTML(formatted)
+				msgPlain := tgbotapi.NewMessage(chatID, plain)
+				_, _ = r.bot.Send(msgPlain)
+			}
 		}
 	}
 }

@@ -154,58 +154,51 @@ func (r *StreamAgentRunner) RunStream(ctx context.Context, opts StreamRunOptions
 		return nil, fmt.Errorf("failed to write to stdin: %w", err)
 	}
 
-	// Read NDJSON stream from stdout
-	scanner := bufio.NewScanner(stdout)
-	// Allow scanning lines up to 2MB (for large tool outputs/diffs)
-	const maxScanCapacity = 2 * 1024 * 1024
-	scanBuf := make([]byte, 64*1024)
-	scanner.Buffer(scanBuf, maxScanCapacity)
-
+	// Read NDJSON stream from stdout using bufio.Reader (supports unlimited line sizes without ErrTooLong)
+	reader := bufio.NewReaderSize(stdout, 64*1024)
 	var finalResult *ResultPayload
 
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" {
-			continue
-		}
+	for {
+		lineBytes, readErr := reader.ReadBytes('\n')
+		if len(lineBytes) > 0 {
+			line := strings.TrimSpace(string(lineBytes))
+			if line != "" {
+				var event StreamEvent
+				if jsonErr := json.Unmarshal([]byte(line), &event); jsonErr == nil {
+					switch event.Event {
+					case "init":
+						convID := event.ConversationID
+						if cb.OnInit != nil {
+							cb.OnInit(convID, event.Init)
+						}
 
-		// Check if line is an event
-		var event StreamEvent
-		if err := json.Unmarshal([]byte(line), &event); err != nil {
-			// Non-JSON output (maybe plain text warning)
-			continue
-		}
+					case "step_update":
+						if event.StepUpdate != nil {
+							if event.StepUpdate.TextDelta != "" && cb.OnDelta != nil {
+								cb.OnDelta(event.StepUpdate.TextDelta)
+							}
+							if cb.OnStepUpdate != nil {
+								cb.OnStepUpdate(event.StepUpdate)
+							}
+						}
 
-		switch event.Event {
-		case "init":
-			convID := event.ConversationID
-			if cb.OnInit != nil {
-				cb.OnInit(convID, event.Init)
-			}
-
-		case "step_update":
-			if event.StepUpdate != nil {
-				if event.StepUpdate.TextDelta != "" && cb.OnDelta != nil {
-					cb.OnDelta(event.StepUpdate.TextDelta)
-				}
-				if cb.OnStepUpdate != nil {
-					cb.OnStepUpdate(event.StepUpdate)
-				}
-			}
-
-		case "result":
-			if event.Result != nil {
-				finalResult = event.Result
-				if cb.OnResult != nil {
-					cb.OnResult(event.Result)
+					case "result":
+						if event.Result != nil {
+							finalResult = event.Result
+							if cb.OnResult != nil {
+								cb.OnResult(event.Result)
+							}
+						}
+					}
 				}
 			}
 		}
-	}
 
-	if err := scanner.Err(); err != nil && err != io.EOF {
-		if cb.OnError != nil {
-			cb.OnError(err)
+		if readErr != nil {
+			if readErr != io.EOF && cb.OnError != nil {
+				cb.OnError(readErr)
+			}
+			break
 		}
 	}
 
