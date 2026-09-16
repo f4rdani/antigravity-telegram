@@ -62,6 +62,7 @@ func NewBotServer(cfg *config.Config, sm *session.SessionManager) (*BotServer, e
 		{Command: "permission", Description: "Atur mode persetujuan tools"},
 		{Command: "cancel", Description: "Hentikan proses yang berjalan"},
 		{Command: "file", Description: "Unduh file dari server ke Telegram"},
+		{Command: "artifact", Description: "Buka, unduh, approve/reject artifact & plan"},
 	}
 
 	setCmds := tgbotapi.NewSetMyCommands(commands...)

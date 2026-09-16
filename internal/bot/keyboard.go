@@ -3,6 +3,7 @@ package bot
 import (
 	"fmt"
 
+	"agy-tele/internal/artifact"
 	"agy-tele/internal/session"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -12,7 +13,7 @@ func QuickActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📂 Resume Sesi", "cmd_resume_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("🔄 Sesi Baru", "cmd_new"),
+			tgbotapi.NewInlineKeyboardButtonData("📑 Artifacts & Plans", "cmd_artifact_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("📊 Quota/Usage", "cmd_usage"),
@@ -28,6 +29,9 @@ func QuickActionKeyboard() tgbotapi.InlineKeyboardMarkup {
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🔒 Atur Permission", "cmd_perm_menu"),
+			tgbotapi.NewInlineKeyboardButtonData("🔄 Sesi Baru", "cmd_new"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Menu", "cmd_delete_msg"),
 		),
 	)
@@ -150,6 +154,50 @@ func RefreshAndBackKeyboard(refreshCmd string, backCmd string) tgbotapi.InlineKe
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("🔄 Refresh", refreshCmd),
 			tgbotapi.NewInlineKeyboardButtonData("« Kembali", backCmd),
+			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+		),
+	)
+}
+
+func ArtifactListKeyboard(items []artifact.Item) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	for i, item := range items {
+		status := "📄"
+		if item.RequestFeedback {
+			status = "🔔"
+		}
+		timeStr := ""
+		if item.TimeLabel != "" {
+			timeStr = " (" + item.TimeLabel + ")"
+		}
+		btnText := fmt.Sprintf("%s %d. %s%s", status, i+1, item.ID, timeStr)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(btnText, "art_select:"+item.ID),
+		))
+	}
+
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData("🔄 Refresh", "cmd_artifact_menu"),
+		tgbotapi.NewInlineKeyboardButtonData("« Menu", "cmd_help_menu"),
+		tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+	))
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+func ArtifactDetailKeyboard(item artifact.Item) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("📖 Buka Isi File", "art_open:"+item.ID),
+			tgbotapi.NewInlineKeyboardButtonData("📥 Unduh Dokumen", "art_download:"+item.ID),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("✅ Approve & Eksekusi", "art_approve:"+item.ID),
+			tgbotapi.NewInlineKeyboardButtonData("❌ Reject / Revisi", "art_reject:"+item.ID),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData("« Kembali ke Daftar", "cmd_artifact_menu"),
 			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
 		),
 	)

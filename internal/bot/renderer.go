@@ -4,18 +4,21 @@ import (
 	"fmt"
 	"strings"
 
+	"agy-tele/internal/artifact"
 	"agy-tele/internal/engine"
 	"agy-tele/internal/renderer"
 	"agy-tele/internal/session"
 )
 
-const AppVersion = "v1.0.5"
+const AppVersion = "v1.0.7"
 
 func FormatHelp() string {
 	var sb strings.Builder
 	sb.WriteString("🤖 <b>Antigravity CLI Remote Bridge (" + AppVersion + ")</b>\n\n")
 	sb.WriteString("<b>⚡ Agent Execution (Mode B):</b>\n")
 	sb.WriteString("• Kirim teks biasa untuk prompt / coding agent\n")
+	sb.WriteString("• Kirim foto, dokumen, video, atau audio untuk dianalisis otomatis\n")
+	sb.WriteString("• <code>/artifact</code> — Kelola dokumen/plan: buka, unduh, approve, atau minta revisi\n")
 	sb.WriteString("• <code>/resume</code> — Pilih dan lanjutkan sesi percakapan sebelumnya\n")
 	sb.WriteString("• <code>/plan &lt;task&gt;</code> — Jalankan perencanaan terstruktur\n")
 	sb.WriteString("• <code>/goal &lt;task&gt;</code> — Jalankan task autonomous jangka panjang\n")
@@ -116,6 +119,65 @@ func FormatSessions(convs []session.AvailableConversation, activeID string) stri
 		}
 		sb.WriteString(fmt.Sprintf("   👉 Resume: <code>/resume %s</code>\n\n", shortID))
 	}
+
+	return sb.String()
+}
+
+func FormatArtifacts(items []artifact.Item) string {
+	if len(items) == 0 {
+		return "📑 <b>Tidak ada artifact ditemukan.</b>\nArtifact biasanya berupa rencana kerja (/plan), laporan PRD, atau dokumen terstruktur yang dibuat oleh Antigravity."
+	}
+
+	var sb strings.Builder
+	sb.WriteString("📑 <b>Daftar Artifact & Plans:</b>\n\n")
+
+	for i, it := range items {
+		status := "📄"
+		if it.RequestFeedback {
+			status = "🔔 [Menunggu Review]"
+		}
+		timeInfo := ""
+		if it.TimeLabel != "" {
+			timeInfo = fmt.Sprintf(" • <i>%s</i>", it.TimeLabel)
+		}
+		sizeKB := float64(it.SizeBytes) / 1024.0
+
+		sb.WriteString(fmt.Sprintf("<b>%d. %s</b> %s%s\n", i+1, EscapeHTML(it.ID), status, timeInfo))
+		if it.Summary != "" {
+			sb.WriteString(fmt.Sprintf("   📝 <i>%s</i>\n", EscapeHTML(it.Summary)))
+		}
+		sb.WriteString(fmt.Sprintf("   📦 Ukuran: <code>%.1f KB</code>\n\n", sizeKB))
+	}
+
+	sb.WriteString("<i>Silakan klik salah satu artifact di bawah untuk membuka detail atau memberikan approval.</i>")
+	return sb.String()
+}
+
+func FormatArtifactDetail(it artifact.Item) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("📑 <b>Artifact:</b> <code>%s</code>\n\n", EscapeHTML(it.FileName)))
+
+	if it.RequestFeedback {
+		sb.WriteString("🔔 <b>Status:</b> 🟡 <i>Menunggu Review & Persetujuan (Feedback Required)</i>\n")
+	} else {
+		sb.WriteString("📄 <b>Status:</b> 🟢 <i>Tersimpan</i>\n")
+	}
+
+	if it.TimeLabel != "" {
+		sb.WriteString(fmt.Sprintf("🕒 <b>Waktu:</b> %s\n", it.TimeLabel))
+	}
+	sb.WriteString(fmt.Sprintf("📦 <b>Ukuran:</b> %.1f KB\n", float64(it.SizeBytes)/1024.0))
+	sb.WriteString(fmt.Sprintf("📁 <b>Path:</b> <code>%s</code>\n\n", EscapeHTML(it.Path)))
+
+	if it.Summary != "" {
+		sb.WriteString(fmt.Sprintf("📝 <b>Ringkasan:</b>\n%s\n\n", EscapeHTML(it.Summary)))
+	}
+
+	sb.WriteString("Pilih tindakan di bawah:\n")
+	sb.WriteString("• <b>Buka Isi File</b>: Tampilkan preview isi dokumen di chat\n")
+	sb.WriteString("• <b>Unduh Dokumen</b>: Kirim file markdown asli ke Telegram\n")
+	sb.WriteString("• <b>Approve</b>: Setujui rencana & instruksikan bot untuk lanjut eksekusi\n")
+	sb.WriteString("• <b>Reject</b>: Minta bot untuk merevisi artifact/rencana ini")
 
 	return sb.String()
 }

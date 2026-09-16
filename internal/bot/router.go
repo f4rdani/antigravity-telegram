@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"agy-tele/config"
+	"agy-tele/internal/artifact"
 	"agy-tele/internal/engine"
 	"agy-tele/internal/renderer"
 	"agy-tele/internal/session"
@@ -60,12 +61,46 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		return
 	}
 
+	sess := r.sm.GetSession(userID, chatID)
+
+	// Check if message contains media/file attachments (Photo, Document, Video, Audio, Voice)
+	hasMedia := len(msg.Photo) > 0 || msg.Document != nil || msg.Video != nil || msg.Audio != nil || msg.Voice != nil
+	if hasMedia {
+		media, err := r.DownloadMessageMedia(msg, sess.CWD)
+		if err != nil {
+			r.sendText(chatID, fmt.Sprintf("❌ Gagal mengunduh file lampiran: %v", err))
+			return
+		}
+		if media != nil {
+			sizeKB := float64(media.SizeBytes) / 1024.0
+			r.sendText(chatID, fmt.Sprintf("📥 <b>File Diterima:</b> <code>%s</code> (%.1f KB)\n💾 Disimpan ke: <code>%s</code>\n⏳ <i>Antigravity sedang menganalisis file...</i>",
+				renderer.EscapeHTML(media.FileName), sizeKB, renderer.EscapeHTML(media.FilePath)))
+
+			prompt := ""
+			caption := strings.TrimSpace(msg.Caption)
+			if caption != "" {
+				prompt = fmt.Sprintf("User telah mengunggah file ke workspace: %s\n\nCatatan/instruksi user:\n%s\n\nSilakan periksa, baca, dan tanggapi permintaan user mengenai file tersebut.", media.FilePath, caption)
+			} else {
+				prompt = fmt.Sprintf("User telah mengunggah file ke workspace: %s\n\nSilakan periksa dan jelaskan/analisis isi dari file tersebut.", media.FilePath)
+			}
+
+			r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+				UserID:         userID,
+				Prompt:         prompt,
+				CWD:            sess.CWD,
+				ConversationID: sess.ActiveConversationID,
+				PermissionMode: sess.PermissionMode,
+				Model:          sess.ActiveModel,
+				Effort:         sess.ActiveEffort,
+			})
+			return
+		}
+	}
+
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
 		return
 	}
-
-	sess := r.sm.GetSession(userID, chatID)
 
 	// Command routing
 	if strings.HasPrefix(text, "/") {
@@ -329,6 +364,20 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			r.sendText(chatID, "Tidak ada proses yang sedang aktif berjalan.")
 		}
 
+	case "/artifact", "/artifacts":
+		items, err := artifact.ListArtifacts(sess.ActiveConversationID)
+		if err != nil || len(items) == 0 {
+			reply := tgbotapi.NewMessage(chatID, "📑 <b>Tidak ada artifact ditemukan.</b>\nArtifact dibuat otomatis saat menjalankan perencana (misal <code>/plan &lt;tugas&gt;</code>) atau saat Antigravity menghasilkan dokumen/rancangan arsitektur.")
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = CloseOnlyKeyboard()
+			_, _ = r.bot.Send(reply)
+			return
+		}
+		reply := tgbotapi.NewMessage(chatID, FormatArtifacts(items))
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = ArtifactListKeyboard(items)
+		_, _ = r.bot.Send(reply)
+
 	case "/file":
 		if args == "" {
 			r.sendText(chatID, "Format: <code>/file &lt;relative_or_abs_path&gt;</code>")
@@ -428,6 +477,117 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		}
+
+	case data == "cmd_artifact_menu":
+		items, err := artifact.ListArtifacts(sess.ActiveConversationID)
+		if err != nil || len(items) == 0 {
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, "📑 <b>Tidak ada artifact ditemukan.</b>\nArtifact dibuat otomatis saat menjalankan perencana (misal <code>/plan &lt;tugas&gt;</code>) atau saat Antigravity menghasilkan dokumen terstruktur.")
+			edit.ParseMode = "HTML"
+			kb := CloseOnlyKeyboard()
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		} else {
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatArtifacts(items))
+			edit.ParseMode = "HTML"
+			kb := ArtifactListKeyboard(items)
+			edit.ReplyMarkup = &kb
+			_, _ = r.bot.Send(edit)
+		}
+
+	case strings.HasPrefix(data, "art_select:"):
+		artID := strings.TrimPrefix(data, "art_select:")
+		items, _ := artifact.ListArtifacts(sess.ActiveConversationID)
+		var found *artifact.Item
+		for _, it := range items {
+			if it.ID == artID {
+				found = &it
+				break
+			}
+		}
+		if found == nil {
+			r.sendText(chatID, "❌ Artifact tidak ditemukan.")
+			return
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatArtifactDetail(*found))
+		edit.ParseMode = "HTML"
+		kb := ArtifactDetailKeyboard(*found)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case strings.HasPrefix(data, "art_open:"):
+		artID := strings.TrimPrefix(data, "art_open:")
+		items, _ := artifact.ListArtifacts(sess.ActiveConversationID)
+		var found *artifact.Item
+		for _, it := range items {
+			if it.ID == artID {
+				found = &it
+				break
+			}
+		}
+		if found == nil {
+			r.sendText(chatID, "❌ Artifact tidak ditemukan.")
+			return
+		}
+		content, err := os.ReadFile(found.Path)
+		if err != nil {
+			r.sendText(chatID, fmt.Sprintf("❌ Gagal membaca file artifact: %v", err))
+			return
+		}
+		strContent := string(content)
+		if len(strContent) > 3500 {
+			strContent = strContent[:3500] + "\n\n...<i>(konten dipotong, gunakan tombol 'Unduh Dokumen' untuk melihat seluruh file)</i>"
+		}
+		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📖 <b>Isi Dokumen: %s</b>\n\n%s", renderer.EscapeHTML(found.FileName), renderer.FormatMarkdownForTelegram(strContent)))
+		reply.ParseMode = "HTML"
+		kb := ArtifactDetailKeyboard(*found)
+		reply.ReplyMarkup = &kb
+		_, _ = r.bot.Send(reply)
+
+	case strings.HasPrefix(data, "art_download:"):
+		artID := strings.TrimPrefix(data, "art_download:")
+		items, _ := artifact.ListArtifacts(sess.ActiveConversationID)
+		var found *artifact.Item
+		for _, it := range items {
+			if it.ID == artID {
+				found = &it
+				break
+			}
+		}
+		if found == nil {
+			r.sendText(chatID, "❌ Artifact tidak ditemukan.")
+			return
+		}
+		doc := tgbotapi.NewDocument(chatID, tgbotapi.FilePath(found.Path))
+		doc.Caption = fmt.Sprintf("📑 Artifact: %s (%.1f KB)", found.FileName, float64(found.SizeBytes)/1024.0)
+		_, _ = r.bot.Send(doc)
+
+	case strings.HasPrefix(data, "art_approve:"):
+		artID := strings.TrimPrefix(data, "art_approve:")
+		r.sendText(chatID, fmt.Sprintf("✅ <b>Artifact Disetujui:</b> <code>%s</code>\n🚀 Melanjutkan eksekusi rencana...", artID))
+		prompt := fmt.Sprintf("Saya telah meninjau dan menyetujui artifact '%s'. Silakan lanjutkan ke langkah implementasi dan eksekusi selanjutnya secara bertahap.", artID)
+		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+			UserID:         userID,
+			Prompt:         prompt,
+			CWD:            sess.CWD,
+			ConversationID: sess.ActiveConversationID,
+			PermissionMode: sess.PermissionMode,
+			Model:          sess.ActiveModel,
+			Effort:         sess.ActiveEffort,
+		})
+
+	case strings.HasPrefix(data, "art_reject:"):
+		artID := strings.TrimPrefix(data, "art_reject:")
+		r.sendText(chatID, fmt.Sprintf("❌ <b>Artifact Ditolak / Meminta Revisi:</b> <code>%s</code>\nSilakan berikan instruksi revisi atau agen akan meninjau ulang alternatif rencana ini.", artID))
+		prompt := fmt.Sprintf("Saya menolak artifact/rencana '%s'. Tolong tinjau kembali kekurangan rencana tersebut dan buat revisi alternatif yang lebih baik.", artID)
+		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+			UserID:         userID,
+			Prompt:         prompt,
+			CWD:            sess.CWD,
+			ConversationID: sess.ActiveConversationID,
+			PermissionMode: sess.PermissionMode,
+			Model:          sess.ActiveModel,
+			Effort:         sess.ActiveEffort,
+		})
 
 	case strings.HasPrefix(data, "resume_id:"):
 		convID := strings.TrimPrefix(data, "resume_id:")
