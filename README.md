@@ -22,6 +22,7 @@
 - [Architecture & Engine Design](#-architecture--engine-design)
 - [Slash Command Reference](#-slash-command-reference)
 - [Zero Chat Clutter UI](#-zero-chat-clutter-ui)
+- [Rich Markdown & Table Formatting](#-rich-markdown--table-formatting)
 - [Performance & Resource Budget](#-performance--resource-budget)
 - [Quickstart (Local Testing)](#-quickstart-local-testing)
 - [Production Deployment (Linux Server)](#-production-deployment-linux-server)
@@ -48,7 +49,12 @@ Running autonomous coding sessions or monitoring long-running agent tasks (`/pla
 - **Dual-Engine Execution**:
   - **Mode A (Fast CLI Inspection)**: Instant one-shot execution for `/usage`, `/credits`, `/skills`, `/model`, `/effort`, `/agents`, `/changelog` (<100ms return).
   - **Mode B (Stream-JSON Agent Engine)**: Continuous multi-turn coding agent, `/plan <task>`, `/goal <task>`, and skill execution with `--conversation <id>` context retention.
-- **Throttled Live Streaming**: Responds in real-time by buffering token deltas (1200ms window) to prevent Telegram `HTTP 429 Too Many Requests`.
+- **Multimodal File & Photo Uploads**: Send photos, documents, code files, or logs directly through Telegram. They are automatically saved into the active workspace and analyzed by the agent with your custom caption.
+- **Interactive Artifact Review (`/artifact`)**: Inspect generated architecture designs, specs, and plan documents directly inside Telegram with inline pagination, full previews, and instant document downloads.
+- **Rich Markdown & Table Rendering**:
+  - Automatically transforms standard Markdown tables into beautiful, aligned Unicode box tables (`┌─┬─┐...`) inside `<pre>` blocks, supporting smooth horizontal scrolling on mobile devices without layout breaking.
+  - Full support for native Telegram 7.0+ `<blockquote>...</blockquote>` quotes and formatted horizontal dividers.
+- **Throttled Zero-Flicker Streaming**: Live streaming with token delta throttling (1200ms) and in-place status adoption (`AdoptMessageID`), eliminating chat jitter and avoiding Telegram API `HTTP 429`.
 - **Zero Chat Clutter (In-Place UI)**: Interactive dashboards and configuration menus edit in-place and include `[ 🗑️ Tutup ]` instant dismissal buttons.
 - **Auto-Sanitasi Link Path Lokal**: Automatically converts internal Antigravity `[`path`](file:///path)` links into crisp, monospaced code badges (`<code>path</code>`).
 - **User-Configurable Tool Permissions**: Switch between `auto` (`--dangerously-skip-permissions` for hands-free mobile autonomy) and `ask` (manual confirmation).
@@ -113,6 +119,7 @@ sequenceDiagram
 | Command | Description |
 | :--- | :--- |
 | `Plain Text Prompt` | Dispatches coding prompt or conversational instruction to the agent. |
+| `File / Photo / Doc` | Uploads file/image into workspace and triggers agent inspection with optional caption. |
 | `/plan <task>` | Initiates in-depth planning mode (`--mode plan`) with structured milestone breakdown. |
 | `/goal <task>` | Runs an autonomous, long-running goal with progress milestones. |
 | `/continue` | Continues the previous conversation session seamlessly (`--continue`). |
@@ -123,21 +130,23 @@ sequenceDiagram
 | :--- | :--- |
 | `/usage`, `/quota` | Real-time 5-hour and weekly quota usage table (Gemini & Claude/GPT models). |
 | `/credits` | Displays current G1 credit balance. |
-| `/model [name]` | Shows active model or presents an interactive picker to switch models instantly. |
+| `/model [name\|reset]` | Shows active model, presents an interactive picker, or resets to default (`/model reset`). |
 | `/effort [level]` | Sets reasoning effort (`low`, `medium`, `high`). |
 | `/skills` | Lists all installed Antigravity skills with descriptions. |
 | `/agents` | Lists available custom subagents. |
 | `/changelog` | Displays recent release notes and changes. |
 
-### 📂 Workspace & Session Navigation
+### 📂 Workspace, Artifacts & Session Navigation
 | Command | Description |
 | :--- | :--- |
 | `/cwd [path]` | Gets or changes the active working directory (defaults to `/` on Linux, `C:\` on Windows). |
 | `/pwd` | Prints the active working directory. |
 | `/ls [path]` | Lists files and directories in the target path. |
 | `/new [path]` | Resets the conversation session (optionally in a new workspace path). |
+| `/resume [id]` | Interactively browses and resumes past sessions by topic title, timestamp, and workspace. |
 | `/sessions` | Lists previous conversation IDs with timestamps for fast context switching. |
 | `/switch <id>` | Switches active context to a specific conversation ID. |
+| `/artifact`, `/artifacts` | Opens interactive browser for generated plans, architecture designs, and documents. |
 | `/permission [auto\|ask]` | Toggles tool permissions: `auto` (hands-free) or `ask` (manual confirmation). |
 | `/status` | Displays full runtime daemon state, workspace, active model, and permission mode. |
 | `/file <path>` | Sends a file from the server workspace directly as a Telegram document. |
@@ -150,6 +159,25 @@ Unlike ordinary Telegram bots that flood your chat with new messages for every b
 1. **In-Place Navigation**: Clicking menu buttons (**📊 Quota**, **🧠 Ganti Model**, **⚡ Set Effort**, **🧰 Skills**, **🔄 Sesi Baru**) updates the **same message in-place** without spawning extra messages.
 2. **Instant Dismissal (`[ 🗑️ Tutup ]`)**: Every status, directory, and quota card contains a close button that **instantly deletes the message** from chat history.
 3. **In-Place Refresh (`[ 🔄 Refresh ]`)**: Refresh live quotas and statuses directly on the active card.
+
+---
+
+## 🎨 Rich Markdown & Table Formatting
+
+Telegram Bot API does not natively support HTML `<table>` tags. `agy-tele` includes a built-in markdown parser and formatter that transforms LLM output into elegant mobile-ready components:
+
+1. **Monospace Unicode Box Tables**:
+   Markdown tables are parsed, auto-padded to exact column character widths, and wrapped inside `<pre>` blocks using Unicode box-drawing glyphs. On mobile Telegram apps, these tables retain their columnar alignment and support smooth horizontal scrolling:
+   ```text
+   ┌──────┬─────────┬──────────────────┬──────────────┬──────────────────────┐
+   │ Tipe │ Total   │ Digunakan (Used) │ Bebas (Free) │ Tersedia (Available) │
+   ├──────┼─────────┼──────────────────┼──────────────┼──────────────────────┤
+   │ RAM  │ 1.9 GiB │ 910 MiB          │ 506 MiB      │ 1.0 GiB              │
+   │ Swap │ 4.0 GiB │ 17 MiB           │ 4.0 GiB      │ -                    │
+   └──────┴─────────┴──────────────────┴──────────────┴──────────────────────┘
+   ```
+2. **Native Blockquotes (`<blockquote>`)**: Lines starting with `> ` are converted into Telegram 7.0+ native blockquotes featuring an accent vertical line.
+3. **Sanitized Links & Dividers**: File links (`file:///...`) are converted to clean code chips, and markdown rules (`---`) become neat dividers.
 
 ---
 
