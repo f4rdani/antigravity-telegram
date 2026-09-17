@@ -65,8 +65,11 @@ Running autonomous coding sessions or monitoring long-running agent tasks (`/pla
 - **Throttled Zero-Flicker Streaming**: Live streaming with token delta throttling (1200ms) and in-place status adoption (`AdoptMessageID`), eliminating chat jitter and avoiding Telegram API `HTTP 429`.
 - **Zero Chat Clutter (In-Place UI)**: Interactive dashboards and configuration menus edit in-place and include `[ 🗑️ Tutup ]` instant dismissal buttons.
 - **Auto-Sanitasi Link Path Lokal**: Automatically converts internal Antigravity `[`path`](file:///path)` links into crisp, monospaced code badges (`<code>path</code>`).
-- **User-Configurable Tool Permissions**: Switch between `auto` (`--dangerously-skip-permissions` for hands-free mobile autonomy) and `ask` (manual confirmation).
-- **Dynamic Workspace Navigation**: Starts at filesystem Root (`/` on Linux, `C:\` on Windows) and allows dynamic directory navigation via `/cwd <path>`, `/pwd`, and `/ls [path]`.
+- **Interactive Multi-Account Google OAuth Management (`/accounts`, `/login`, `/signout`)**:
+  - Seamlessly switch between multiple Google accounts with 1-click inline buttons without re-opening a browser or re-authorizing every time.
+  - Automatically archives tokens in `~/.gemini/antigravity-cli/accounts/<email>.json` upon logout or account switch.
+  - Interactive OAuth 2.0 consumer login bridge powered by a virtual pseudo-terminal (PTY), displaying direct Google authorization links and accepting codes or raw redirect callback URLs.
+  - Informative error handling and automatic recovery for invalid or expired OAuth codes.
 - **Single-Tenant Security**: Whitelists authorized Telegram User IDs (`allowed_user_ids`). Unauthenticated users are completely blocked.
 
 ---
@@ -144,6 +147,15 @@ sequenceDiagram
 | `/agents` | Lists available custom subagents. |
 | `/changelog` | Displays recent release notes and changes. |
 
+### 👤 Google Account Management
+| Command | Description |
+| :--- | :--- |
+| `/accounts` | Interactive dashboard to view, switch, or remove saved Google accounts with 1-click buttons. |
+| `/login`, `/signin` | Initiates OAuth 2.0 authorization, returning a Google login link and waiting for authorization code. |
+| `/signout`, `/logout` | Signs out of the current Google account and safely archives it to saved accounts. |
+| `/whoami` | Shows full profile details (email, name, auth method, token expiry) of the active account. |
+| `/code <code>` | Submits the OAuth authorization code or full callback URL to complete login. |
+
 ### 📂 Workspace, Artifacts & Session Navigation
 | Command | Description |
 | :--- | :--- |
@@ -153,10 +165,10 @@ sequenceDiagram
 | `/new [path]` | Resets the conversation session (optionally in a new workspace path). |
 | `/resume [id]` | Interactively browses and resumes past sessions by topic title, timestamp, and workspace. |
 | `/sessions` | Lists previous conversation IDs with timestamps for fast context switching. |
-| `/switch <id>` | Switches active context to a specific conversation ID. |
+| `/switch <id\|email>` | Switches active context to a specific conversation ID or saved Google account email. |
 | `/artifact`, `/artifacts` | Opens interactive browser for generated plans, architecture designs, and documents. |
 | `/permission [auto\|ask]` | Toggles tool permissions: `auto` (hands-free) or `ask` (manual confirmation). |
-| `/status` | Displays full runtime daemon state, workspace, active model, and permission mode. |
+| `/status` | Displays full runtime daemon state, active Google account, workspace, active model, and permission mode. |
 | `/autodelete [limit]` | Configures auto-deletion limit for Telegram messages (`20`, `50`, `100`, `off`, or `clean`). |
 | `/lang [id\|en]` | Switches interface language between Bahasa Indonesia (`id`) and English (`en`). |
 | `/file <path>` | Sends a file from the server workspace directly as a Telegram document. |

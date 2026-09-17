@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"agy-tele/internal/artifact"
+	"agy-tele/internal/auth"
 	"agy-tele/internal/i18n"
 	"agy-tele/internal/session"
 
@@ -35,6 +36,9 @@ func QuickActionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_autodelete"), "cmd_autodelete_menu"),
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_language"), "cmd_lang_menu"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_accounts"), "cmd_accounts_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close_menu"), "cmd_delete_msg"),
@@ -333,6 +337,87 @@ func ActiveTaskKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_cancel_task"), "cmd_cancel_active_task"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		),
+	)
+}
+
+func AuthLoginKeyboard(loginURL, lang string) tgbotapi.InlineKeyboardMarkup {
+	openText := i18n.T(lang, "btn_open_google_login")
+	cancelText := i18n.T(lang, "btn_cancel_login")
+
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonURL(openText, loginURL),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(cancelText, "auth_cancel"),
+		),
+	)
+}
+
+func AccountsKeyboard(accounts []auth.AccountInfo, activeEmail, lang string) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	for _, a := range accounts {
+		label := "👤 " + a.Email
+		if a.IsActive {
+			label = "🟢 " + a.Email + " (Aktif)"
+			if i18n.NormalizeLang(lang) == "en" {
+				label = "🟢 " + a.Email + " (Active)"
+			}
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(label, "auth_detail:"+a.Email),
+		))
+	}
+
+	// Action row: Add new account
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_add_account"), "auth_start"),
+	))
+
+	// Control row: Refresh & Close
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_refresh"), "cmd_accounts_menu"),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+	))
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+func AccountDetailKeyboard(email string, isActive bool, lang string) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	if !isActive {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_switch_account"), "auth_switch:"+email),
+		))
+	} else {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_signout"), "auth_signout"),
+		))
+	}
+
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_delete_account"), "auth_delete:"+email),
+	))
+
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), "cmd_accounts_menu"),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+	))
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+
+func AuthErrorKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_retry_login"), "auth_start"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_saved_accounts"), "cmd_accounts_menu"),
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)

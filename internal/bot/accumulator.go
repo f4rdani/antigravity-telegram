@@ -85,7 +85,9 @@ func IsInstantCommand(text string) bool {
 		"/model", "/effort", "/perm", "/cwd", "/ls", "/clear",
 		"/sessions", "/resume", "/new", "/lang", "/usage",
 		"/quota", "/credits", "/skills", "/agents", "/changelog",
-		"/artifact", "/artifacts":
+		"/artifact", "/artifacts",
+		"/signout", "/logout", "/signin", "/login",
+		"/accounts", "/switch", "/whoami", "/code":
 		return len(trimmed) < 1000
 	}
 	return false

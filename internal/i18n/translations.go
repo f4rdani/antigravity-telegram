@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"agy-tele/internal/artifact"
+	"agy-tele/internal/auth"
 	"agy-tele/internal/engine"
 	"agy-tele/internal/renderer"
 	"agy-tele/internal/session"
@@ -86,6 +87,15 @@ var translations = map[string]map[string]string{
 		"btn_download_file":          "📥 Unduh Dokumen",
 		"btn_approve":                "✅ Approve & Eksekusi",
 		"btn_reject":                 "❌ Reject / Revisi",
+		"btn_accounts":               "👤 Akun Google",
+		"btn_add_account":            "➕ Login Akun Baru",
+		"btn_signout":                "🚪 Sign Out",
+		"btn_switch_account":         "🔄 Beralih ke Akun Ini",
+		"btn_delete_account":         "🗑️ Hapus Akun dari Daftar",
+		"btn_open_google_login":      "🌐 Buka Link Login Google",
+		"btn_cancel_login":           "❌ Batalkan Login",
+		"btn_retry_login":            "🔄 Coba Login Baru",
+		"btn_saved_accounts":         "👥 Daftar Akun Tersimpan",
 	},
 	"en": {
 		"err_occurred":               "An error occurred:",
@@ -125,10 +135,19 @@ var translations = map[string]map[string]string{
 		"btn_list_files":             "📁 List Files (/ls)",
 		"btn_clean_now":              "🧹 Clean Chat History Now",
 		"btn_cancel_task":            "🛑 Stop Active Task",
-		"btn_open_file":              "📖 View Content",
-		"btn_download_file":          "📥 Download Doc",
+		"btn_open_file":              "📖 Preview File",
+		"btn_download_file":          "📥 Download File",
 		"btn_approve":                "✅ Approve & Execute",
-		"btn_reject":                 "❌ Reject / Revise",
+		"btn_reject":                 "❌ Reject / Revision",
+		"btn_accounts":               "👤 Google Account",
+		"btn_add_account":            "➕ Add New Account",
+		"btn_signout":                "🚪 Sign Out",
+		"btn_switch_account":         "🔄 Switch to This Account",
+		"btn_delete_account":         "🗑️ Remove Account from List",
+		"btn_open_google_login":      "🌐 Open Google Login Page",
+		"btn_cancel_login":           "❌ Cancel Login",
+		"btn_retry_login":            "🔄 Try Login Again",
+		"btn_saved_accounts":         "👥 Saved Accounts List",
 	},
 }
 
@@ -157,13 +176,19 @@ func GetHelpText(lang, version string) string {
 		sb.WriteString("• <code>/skills</code> — List installed skills\n")
 		sb.WriteString("• <code>/agents</code> — List available subagents\n\n")
 
+		sb.WriteString("<b>👤 Google Account Management:</b>\n")
+		sb.WriteString("• <code>/accounts</code> — Switch or manage connected Google accounts\n")
+		sb.WriteString("• <code>/login</code> — Connect new Google account via OAuth\n")
+		sb.WriteString("• <code>/signout</code> — Sign out of current Google account\n")
+		sb.WriteString("• <code>/whoami</code> — View currently active account profile\n\n")
+
 		sb.WriteString("<b>📂 Workspace & Session:</b>\n")
 		sb.WriteString("• <code>/cwd [path]</code> — Show / change working directory\n")
 		sb.WriteString("• <code>/ls [path]</code> — List files and folders on server\n")
 		sb.WriteString("• <code>/pwd</code> — Show current active directory path\n")
 		sb.WriteString("• <code>/new [path]</code> — Start a new conversation session\n")
 		sb.WriteString("• <code>/sessions</code> — View conversation session history\n")
-		sb.WriteString("• <code>/switch &lt;id&gt;</code> — Switch to a specific conversation ID\n")
+		sb.WriteString("• <code>/switch &lt;id|email&gt;</code> — Switch conversation or account\n")
 		sb.WriteString("• <code>/permission [auto|ask]</code> — Set tool approval mode\n")
 		sb.WriteString("• <code>/status</code> — Show daemon runtime status & workspace\n")
 		sb.WriteString("• <code>/autodelete [limit]</code> — Configure Telegram auto-delete limit (e.g. 50, 0/off)\n")
@@ -189,13 +214,19 @@ func GetHelpText(lang, version string) string {
 		sb.WriteString("• <code>/skills</code> — Daftar skills yang terpasang\n")
 		sb.WriteString("• <code>/agents</code> — Daftar subagents yang tersedia\n\n")
 
+		sb.WriteString("<b>👤 Manajemen Akun Google:</b>\n")
+		sb.WriteString("• <code>/accounts</code> — Kelola & beralih akun Google yang tersimpan\n")
+		sb.WriteString("• <code>/login</code> — Hubungkan akun Google baru via OAuth\n")
+		sb.WriteString("• <code>/signout</code> — Keluar dari akun Google aktif\n")
+		sb.WriteString("• <code>/whoami</code> — Informasi profil akun Google yang sedang aktif\n\n")
+
 		sb.WriteString("<b>📂 Workspace & Session:</b>\n")
 		sb.WriteString("• <code>/cwd [path]</code> — Tampilkan / ganti direktori kerja\n")
 		sb.WriteString("• <code>/ls [path]</code> — Tampilkan daftar file/folder di server\n")
 		sb.WriteString("• <code>/pwd</code> — Tampilkan path direktori aktif saat ini\n")
 		sb.WriteString("• <code>/new [path]</code> — Mulai percakapan sesi baru\n")
 		sb.WriteString("• <code>/sessions</code> — Daftar riwayat sesi percakapan\n")
-		sb.WriteString("• <code>/switch &lt;id&gt;</code> — Ganti ke ID percakapan tertentu\n")
+		sb.WriteString("• <code>/switch &lt;id|email&gt;</code> — Beralih sesi percakapan atau akun Google\n")
 		sb.WriteString("• <code>/permission [auto|ask]</code> — Atur mode persetujuan tools\n")
 		sb.WriteString("• <code>/status</code> — Informasi status runtime daemon & workspace\n")
 		sb.WriteString("• <code>/autodelete [limit]</code> — Atur batas auto-delete pesan Telegram (misal 50, 0/off)\n")
@@ -214,6 +245,8 @@ func GetStatusText(lang string, sess *session.UserSession, isRunning bool, activ
 	var permStr string
 	var langDisplay string
 	var autoDeleteStr string
+
+	activeAcc, _ := auth.GetActiveAccount()
 
 	if l == "en" {
 		stateStr = "🟢 IDLE (Ready)"
@@ -251,9 +284,15 @@ func GetStatusText(lang string, sess *session.UserSession, isRunning bool, activ
 			effortStr = "(Default agy)"
 		}
 
+		accountStr := "❌ <i>Not logged in</i>"
+		if activeAcc != nil && activeAcc.Email != "" {
+			accountStr = fmt.Sprintf("👤 <code>%s</code> (%s)", renderer.EscapeHTML(activeAcc.Email), renderer.EscapeHTML(activeAcc.Name))
+		}
+
 		return fmt.Sprintf(
 			"⚙️ <b>Daemon Status</b>\n\n"+
 				"• <b>Status</b>: %s\n"+
+				"• <b>Google Account</b>: %s\n"+
 				"• <b>Workspace (CWD)</b>: <code>%s</code>\n"+
 				"• <b>Active Conversation</b>: <code>%s</code>\n"+
 				"• <b>Permission Mode</b>: %s\n"+
@@ -263,6 +302,7 @@ func GetStatusText(lang string, sess *session.UserSession, isRunning bool, activ
 				"• <b>Auto-Delete</b>: %s\n"+
 				"• <b>Last Active</b>: %s",
 			stateStr,
+			accountStr,
 			sess.CWD,
 			convID,
 			permStr,
@@ -309,9 +349,15 @@ func GetStatusText(lang string, sess *session.UserSession, isRunning bool, activ
 		effortStr = "(Default agy)"
 	}
 
+	accountStr := "❌ <i>Belum login</i>"
+	if activeAcc != nil && activeAcc.Email != "" {
+		accountStr = fmt.Sprintf("👤 <code>%s</code> (%s)", renderer.EscapeHTML(activeAcc.Email), renderer.EscapeHTML(activeAcc.Name))
+	}
+
 	return fmt.Sprintf(
 		"⚙️ <b>Status Runtime Daemon</b>\n\n"+
 			"• <b>Status</b>: %s\n"+
+			"• <b>Akun Google</b>: %s\n"+
 			"• <b>Workspace (CWD)</b>: <code>%s</code>\n"+
 			"• <b>Active Conversation</b>: <code>%s</code>\n"+
 			"• <b>Permission Mode</b>: %s\n"+
@@ -321,6 +367,7 @@ func GetStatusText(lang string, sess *session.UserSession, isRunning bool, activ
 			"• <b>Auto-Delete Telegram</b>: %s\n"+
 			"• <b>Terakhir Aktif</b>: %s",
 		stateStr,
+		accountStr,
 		sess.CWD,
 		convID,
 		permStr,
@@ -926,6 +973,210 @@ func GetArtifactDetailText(lang string, it artifact.Item) string {
 		sb.WriteString("• <b>Unduh Dokumen</b>: Kirim file markdown asli ke Telegram\n")
 		sb.WriteString("• <b>Approve</b>: Setujui rencana & instruksikan bot untuk lanjut eksekusi\n")
 		sb.WriteString("• <b>Reject</b>: Minta bot untuk merevisi artifact/rencana ini")
+	}
+
+	return sb.String()
+}
+
+// FormatAccountsList formats the list of saved Google accounts and current active status
+func FormatAccountsList(lang string, active *auth.AccountInfo, accounts []auth.AccountInfo) string {
+	l := NormalizeLang(lang)
+	var sb strings.Builder
+
+	if l == "en" {
+		sb.WriteString("👤 <b>Google Accounts Management</b>\n\n")
+		if active != nil && active.Email != "" {
+			sb.WriteString(fmt.Sprintf("• <b>Active Account:</b> <code>%s</code> (%s)\n", renderer.EscapeHTML(active.Email), renderer.EscapeHTML(active.Name)))
+			if !active.Expiry.IsZero() {
+				sb.WriteString(fmt.Sprintf("• <b>Token Expiry:</b> %s\n", active.Expiry.Format("15:04:05 02 Jan 2006")))
+			}
+			sb.WriteString(fmt.Sprintf("• <b>Auth Method:</b> %s\n\n", active.AuthMethod))
+		} else {
+			sb.WriteString("• <b>Active Account:</b> <i>Not logged in</i> ⚠️\n\n")
+		}
+
+		sb.WriteString("<b>Saved Accounts:</b>\n")
+		if len(accounts) == 0 {
+			sb.WriteString("<i>No saved accounts yet. Click 'Add New Account' to log in.</i>\n")
+		} else {
+			for _, a := range accounts {
+				indicator := "▫️"
+				status := ""
+				if a.IsActive {
+					indicator = "🟢"
+					status = " <b>(Active)</b>"
+				}
+				sb.WriteString(fmt.Sprintf("%s <code>%s</code> (%s)%s\n", indicator, renderer.EscapeHTML(a.Email), renderer.EscapeHTML(a.Name), status))
+			}
+		}
+		sb.WriteString("\n<i>Click an account button below to view details or switch:</i>")
+	} else {
+		sb.WriteString("👤 <b>Manajemen Akun Google Antigravity</b>\n\n")
+		if active != nil && active.Email != "" {
+			sb.WriteString(fmt.Sprintf("• <b>Akun Aktif:</b> <code>%s</code> (%s)\n", renderer.EscapeHTML(active.Email), renderer.EscapeHTML(active.Name)))
+			if !active.Expiry.IsZero() {
+				sb.WriteString(fmt.Sprintf("• <b>Token Kadaluwarsa:</b> %s\n", active.Expiry.Format("15:04:05 02 Jan 2006")))
+			}
+			sb.WriteString(fmt.Sprintf("• <b>Metode Login:</b> %s\n\n", active.AuthMethod))
+		} else {
+			sb.WriteString("• <b>Akun Aktif:</b> <i>Belum login</i> ⚠️\n\n")
+		}
+
+		sb.WriteString("<b>Daftar Akun Tersimpan:</b>\n")
+		if len(accounts) == 0 {
+			sb.WriteString("<i>Belum ada akun tersimpan. Klik 'Login Akun Baru' untuk masuk.</i>\n")
+		} else {
+			for _, a := range accounts {
+				indicator := "▫️"
+				status := ""
+				if a.IsActive {
+					indicator = "🟢"
+					status = " <b>(Aktif)</b>"
+				}
+				sb.WriteString(fmt.Sprintf("%s <code>%s</code> (%s)%s\n", indicator, renderer.EscapeHTML(a.Email), renderer.EscapeHTML(a.Name), status))
+			}
+		}
+		sb.WriteString("\n<i>Klik tombol akun di bawah untuk melihat detail atau beralih akun:</i>")
+	}
+
+	return sb.String()
+}
+
+// FormatAccountDetail formats a single account view
+func FormatAccountDetail(lang string, acc *auth.AccountInfo) string {
+	l := NormalizeLang(lang)
+	var sb strings.Builder
+
+	if l == "en" {
+		status := "Saved (Inactive)"
+		if acc.IsActive {
+			status = "🟢 Active"
+		}
+		sb.WriteString("👤 <b>Account Details</b>\n\n")
+		sb.WriteString(fmt.Sprintf("• <b>Email:</b> <code>%s</code>\n", renderer.EscapeHTML(acc.Email)))
+		sb.WriteString(fmt.Sprintf("• <b>Name:</b> %s\n", renderer.EscapeHTML(acc.Name)))
+		sb.WriteString(fmt.Sprintf("• <b>Status:</b> %s\n", status))
+		sb.WriteString(fmt.Sprintf("• <b>Auth Method:</b> %s\n", acc.AuthMethod))
+		if !acc.Expiry.IsZero() {
+			sb.WriteString(fmt.Sprintf("• <b>Token Expiry:</b> %s\n", acc.Expiry.Format("15:04:05 02 Jan 2006")))
+		}
+		sb.WriteString("\nChoose an action below:")
+	} else {
+		status := "Tersimpan (Tidak Aktif)"
+		if acc.IsActive {
+			status = "🟢 Aktif"
+		}
+		sb.WriteString("👤 <b>Detail Akun Google</b>\n\n")
+		sb.WriteString(fmt.Sprintf("• <b>Email:</b> <code>%s</code>\n", renderer.EscapeHTML(acc.Email)))
+		sb.WriteString(fmt.Sprintf("• <b>Nama:</b> %s\n", renderer.EscapeHTML(acc.Name)))
+		sb.WriteString(fmt.Sprintf("• <b>Status:</b> %s\n", status))
+		sb.WriteString(fmt.Sprintf("• <b>Metode Login:</b> %s\n", acc.AuthMethod))
+		if !acc.Expiry.IsZero() {
+			sb.WriteString(fmt.Sprintf("• <b>Token Kadaluwarsa:</b> %s\n", acc.Expiry.Format("15:04:05 02 Jan 2006")))
+		}
+		sb.WriteString("\nPilih tindakan di bawah:")
+	}
+
+	return sb.String()
+}
+
+// FormatLoginPrompt formats the OAuth login link and step-by-step instructions
+func FormatLoginPrompt(lang, authURL string) string {
+	l := NormalizeLang(lang)
+	var sb strings.Builder
+
+	if l == "en" {
+		sb.WriteString("🔐 <b>Google Antigravity CLI Login</b>\n\n")
+		sb.WriteString("• <b>Method:</b> Google OAuth 2.0 (Consumer)\n")
+		sb.WriteString("• <b>Platform:</b> Official Google Accounts Authorization\n\n")
+		sb.WriteString(fmt.Sprintf("👉 <a href=\"%s\">Click Here to Authorize Google Account</a>\n\n", authURL))
+		sb.WriteString("<b>Instructions:</b>\n")
+		sb.WriteString("1. Click the link above or the button below to open the login page in your browser.\n")
+		sb.WriteString("2. Select your Google account and grant permissions to Google Antigravity.\n")
+		sb.WriteString("3. Copy the <b>Authorization Code</b> (or the entire redirect URL) displayed on screen.\n")
+		sb.WriteString("4. Paste and send the code directly into this chat (or type <code>/code &lt;code&gt;</code>).\n\n")
+		sb.WriteString("⏳ <i>Waiting for authorization code (timeout 3 minutes)...</i>")
+	} else {
+		sb.WriteString("🔐 <b>Login Google Antigravity CLI</b>\n\n")
+		sb.WriteString("• <b>Metode Login:</b> Google OAuth 2.0 (Consumer)\n")
+		sb.WriteString("• <b>Platform:</b> Otorisasi Akun Google Resmi\n\n")
+		sb.WriteString(fmt.Sprintf("👉 <a href=\"%s\">Klik di Sini untuk Login ke Akun Google</a>\n\n", authURL))
+		sb.WriteString("<b>Langkah-langkah:</b>\n")
+		sb.WriteString("1. Klik link di atas atau tombol di bawah untuk membuka halaman login di browser.\n")
+		sb.WriteString("2. Pilih akun Google Anda dan setujui izin akses Google Antigravity.\n")
+		sb.WriteString("3. Salin <b>Kode Otorisasi</b> (atau seluruh link URL redirect) yang muncul di layar.\n")
+		sb.WriteString("4. Kirimkan kode tersebut langsung ke chat bot ini (atau ketik <code>/code &lt;kode&gt;</code>).\n\n")
+		sb.WriteString("⏳ <i>Menunggu kode otorisasi (batas waktu 3 menit)...</i>")
+	}
+
+	return sb.String()
+}
+
+// FormatLoginSuccess formats successful login confirmation
+func FormatLoginSuccess(lang string, acc *auth.AccountInfo) string {
+	l := NormalizeLang(lang)
+	var sb strings.Builder
+
+	if l == "en" {
+		sb.WriteString("✅ <b>Login Successful!</b>\n\n")
+		sb.WriteString(fmt.Sprintf("• <b>Account:</b> <code>%s</code> (%s)\n", renderer.EscapeHTML(acc.Email), renderer.EscapeHTML(acc.Name)))
+		sb.WriteString(fmt.Sprintf("• <b>Auth Method:</b> %s\n", acc.AuthMethod))
+		if !acc.Expiry.IsZero() {
+			sb.WriteString(fmt.Sprintf("• <b>Token Expiry:</b> %s\n", acc.Expiry.Format("15:04:05 02 Jan 2006")))
+		}
+		sb.WriteString("\n🚀 <i>Account is active and saved. You can now use Antigravity CLI freely!</i>")
+	} else {
+		sb.WriteString("✅ <b>Login Berhasil!</b>\n\n")
+		sb.WriteString(fmt.Sprintf("• <b>Akun:</b> <code>%s</code> (%s)\n", renderer.EscapeHTML(acc.Email), renderer.EscapeHTML(acc.Name)))
+		sb.WriteString(fmt.Sprintf("• <b>Metode:</b> %s\n", acc.AuthMethod))
+		if !acc.Expiry.IsZero() {
+			sb.WriteString(fmt.Sprintf("• <b>Token Kadaluwarsa:</b> %s\n", acc.Expiry.Format("15:04:05 02 Jan 2006")))
+		}
+		sb.WriteString("\n🚀 <i>Akun telah aktif dan tersimpan. Anda dapat langsung menggunakan Antigravity CLI!</i>")
+	}
+
+	return sb.String()
+}
+
+// FormatSignOutSuccess formats signout confirmation
+func FormatSignOutSuccess(lang string, email string) string {
+	l := NormalizeLang(lang)
+	var sb strings.Builder
+
+	if l == "en" {
+		sb.WriteString("🚪 <b>Signed Out Successfully!</b>\n\n")
+		if email != "" {
+			sb.WriteString(fmt.Sprintf("Account <code>%s</code> has been signed out and archived to your saved accounts.\n\n", renderer.EscapeHTML(email)))
+		} else {
+			sb.WriteString("Active account has been signed out.\n\n")
+		}
+		sb.WriteString("Choose an action below to switch accounts or sign in:")
+	} else {
+		sb.WriteString("🚪 <b>Sign Out Berhasil!</b>\n\n")
+		if email != "" {
+			sb.WriteString(fmt.Sprintf("Akun <code>%s</code> telah keluar dan disimpan ke daftar akun tersimpan.\n\n", renderer.EscapeHTML(email)))
+		} else {
+			sb.WriteString("Akun aktif telah keluar.\n\n")
+		}
+		sb.WriteString("Pilih tindakan di bawah untuk beralih akun atau login kembali:")
+	}
+
+	return sb.String()
+}
+
+// FormatAuthError formats auth error messages
+func FormatAuthError(lang, errMsg string) string {
+	l := NormalizeLang(lang)
+	var sb strings.Builder
+
+	if l == "en" {
+		sb.WriteString("❌ <b>Login / Authorization Failed:</b>\n\n")
+		sb.WriteString(fmt.Sprintf("<code>%s</code>\n\n", renderer.EscapeHTML(errMsg)))
+		sb.WriteString("Please verify your authorization code and try again using the buttons below:")
+	} else {
+		sb.WriteString("❌ <b>Login / Otorisasi Gagal:</b>\n\n")
+		sb.WriteString(fmt.Sprintf("<code>%s</code>\n\n", renderer.EscapeHTML(errMsg)))
+		sb.WriteString("Pastikan kode otorisasi benar dan belum kedaluwarsa, lalu coba kembali dengan tombol di bawah:")
 	}
 
 	return sb.String()

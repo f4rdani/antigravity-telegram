@@ -11,6 +11,7 @@ import (
 
 	"agy-tele/config"
 	"agy-tele/internal/artifact"
+	"agy-tele/internal/auth"
 	"agy-tele/internal/engine"
 	"agy-tele/internal/i18n"
 	"agy-tele/internal/renderer"
@@ -37,6 +38,7 @@ type Router struct {
 	oneShot      *engine.OneShotRunner
 	streamRunner *engine.StreamAgentRunner
 	accumulator  *MessageAccumulator
+	authMgr      *auth.AuthManager
 	taskMu       sync.Mutex
 	activeTasks  map[int64]*ActiveTask
 }
@@ -49,6 +51,7 @@ func NewRouter(cfg *config.Config, bot *tgbotapi.BotAPI, sm *session.SessionMana
 		oneShot:      engine.NewOneShotRunner(cfg.Agy.BinaryPath),
 		streamRunner: engine.NewStreamAgentRunner(cfg.Agy.BinaryPath),
 		accumulator:  NewMessageAccumulator(),
+		authMgr:      auth.NewAuthManager(cfg.Agy.BinaryPath),
 		activeTasks:  make(map[int64]*ActiveTask),
 	}
 }
@@ -126,6 +129,20 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 
 	text := strings.TrimSpace(msg.Text)
 
+	// Intercept auth code or cancel if user is currently in an active login session
+	if r.authMgr.HasActiveSession(userID) {
+		if text != "" && (strings.EqualFold(text, "/cancel") || strings.EqualFold(text, "/stop")) {
+			r.authMgr.CancelLogin(userID)
+			r.sendText(chatID, i18n.T(sess.Language, "auth_cancelled"))
+			return
+		}
+
+		if text != "" && (!strings.HasPrefix(text, "/") || strings.HasPrefix(strings.ToLower(text), "/code")) {
+			r.handleAuthCodeSubmission(chatID, userID, sess, text)
+			return
+		}
+	}
+
 	// Immediate /cancel or /stop interceptor (always allowed even if a task is running)
 	if text != "" && (strings.EqualFold(text, "/cancel") || strings.EqualFold(text, "/stop")) {
 		if r.cancelActiveTask(userID, chatID) {
@@ -134,6 +151,24 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 			r.sendText(chatID, "ℹ️ Tidak ada proses yang sedang aktif berjalan.")
 		}
 		return
+	}
+
+	// Check if user is signed out when sending prompts
+	if !auth.IsLoggedIn() {
+		if text != "" && !IsInstantCommand(text) && !strings.HasPrefix(text, "/") {
+			accounts, _ := auth.ListSavedAccounts()
+			var reply tgbotapi.MessageConfig
+			if sess.Language == "en" {
+				reply = tgbotapi.NewMessage(chatID, "⚠️ <b>Not Logged In:</b>\nYou must be logged in with a Google account to use Antigravity CLI.\n\nPlease log in or select a saved account below:")
+			} else {
+				reply = tgbotapi.NewMessage(chatID, "⚠️ <b>Belum Login:</b>\nAnda harus login ke akun Google Antigravity terlebih dahulu untuk menggunakan bot ini.\n\nSilakan klik tombol di bawah untuk login atau pilih akun tersimpan:")
+			}
+			reply.ParseMode = "HTML"
+			kb := AccountsKeyboard(accounts, "", sess.Language)
+			reply.ReplyMarkup = &kb
+			_, _ = r.bot.Send(reply)
+			return
+		}
 	}
 
 	// Concurrency Guard: prevent duplicate concurrent agy processes for the same user
@@ -459,7 +494,7 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 		reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 		_, _ = r.bot.Send(reply)
 
-	case "/resume", "/switch":
+	case "/resume":
 		if args != "" {
 			target := strings.TrimSpace(args)
 			convs := r.sm.GetAvailableConversations(userID)
@@ -524,6 +559,35 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 		reply.ParseMode = "HTML"
 		reply.ReplyMarkup = ResumeKeyboard(convs, sess.ActiveConversationID, sess.Language)
 		_, _ = r.bot.Send(reply)
+
+	case "/switch":
+		if args != "" {
+			target := strings.TrimSpace(args)
+			// First check if target matches a saved Google account
+			if accounts, _ := auth.ListSavedAccounts(); len(accounts) > 0 {
+				for _, a := range accounts {
+					if strings.EqualFold(a.Email, target) || strings.HasPrefix(strings.ToLower(a.Email), strings.ToLower(target)) {
+						r.handleSwitchAccount(chatID, userID, sess, a.Email)
+						return
+					}
+				}
+			}
+			// Fallback: check if target matches a conversation ID
+			convs := r.sm.GetAvailableConversations(userID)
+			for _, c := range convs {
+				if c.ID == target || strings.HasPrefix(c.ID, target) {
+					r.sm.UpdateConversation(userID, c.ID, "")
+					reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ <b>Beralih ke Sesi Obrolan:</b> <code>%s</code>", c.ID))
+					reply.ParseMode = "HTML"
+					kb := ResumeConfirmedKeyboard(c.ID, sess.Language)
+					reply.ReplyMarkup = &kb
+					_, _ = r.bot.Send(reply)
+					return
+				}
+			}
+		}
+		// If no argument, open the Google Accounts menu
+		r.handleAccountsMenu(chatID, sess)
 
 	case "/continue":
 		r.sendText(chatID, "⏳ Melanjutkan sesi percakapan sebelumnya...")
@@ -683,6 +747,25 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 			reply.ParseMode = "HTML"
 			reply.ReplyMarkup = LanguageSelectionKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
+		}
+
+	case "/signout", "/logout":
+		r.handleSignOut(chatID, userID, sess)
+
+	case "/signin", "/login":
+		r.handleStartLogin(chatID, userID, sess)
+
+	case "/accounts", "/account":
+		r.handleAccountsMenu(chatID, sess)
+
+	case "/whoami":
+		r.handleWhoami(chatID, sess)
+
+	case "/code":
+		if args != "" {
+			r.handleAuthCodeSubmission(chatID, userID, sess, args)
+		} else {
+			r.sendText(chatID, i18n.T(sess.Language, "auth_enter_code"))
 		}
 
 	default:
@@ -1086,6 +1169,45 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		kb := BackAndCloseKeyboard("cmd_perm_menu", sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
+
+	case data == "auth_start":
+		r.handleStartLogin(chatID, userID, sess)
+
+	case data == "auth_cancel":
+		r.authMgr.CancelLogin(userID)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.T(sess.Language, "auth_cancelled"))
+		edit.ParseMode = "HTML"
+		kb := CloseOnlyKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case data == "auth_signout":
+		r.handleSignOut(chatID, userID, sess)
+
+	case data == "cmd_accounts_menu":
+		accounts, _ := auth.ListSavedAccounts()
+		activeAcc, _ := auth.GetActiveAccount()
+		activeEmail := ""
+		if activeAcc != nil {
+			activeEmail = activeAcc.Email
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.FormatAccountsList(sess.Language, activeAcc, accounts))
+		edit.ParseMode = "HTML"
+		kb := AccountsKeyboard(accounts, activeEmail, sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case strings.HasPrefix(data, "auth_detail:"):
+		email := strings.TrimPrefix(data, "auth_detail:")
+		r.handleAccountDetail(chatID, msgID, sess, email, true)
+
+	case strings.HasPrefix(data, "auth_switch:"):
+		email := strings.TrimPrefix(data, "auth_switch:")
+		r.handleSwitchAccount(chatID, userID, sess, email)
+
+	case strings.HasPrefix(data, "auth_delete:"):
+		email := strings.TrimPrefix(data, "auth_delete:")
+		r.handleDeleteAccount(chatID, msgID, sess, email)
 	}
 }
 
@@ -1585,5 +1707,216 @@ func (r *Router) sendText(chatID int64, text string) {
 	msg := tgbotapi.NewMessage(chatID, text)
 	msg.ParseMode = "HTML"
 	_, _ = r.bot.Send(msg)
+}
+
+func (r *Router) handleStartLogin(chatID int64, userID int64, sess *session.UserSession) {
+	if r.authMgr.HasActiveSession(userID) {
+		r.authMgr.CancelLogin(userID)
+	}
+
+	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, "⏳ Memulai sesi otorisasi Google OAuth 2.0..."))
+	if err != nil {
+		return
+	}
+
+	loginSess, err := r.authMgr.StartLogin(context.Background(), userID, chatID)
+	if err != nil {
+		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatAuthError(sess.Language, err.Error()))
+		edit.ParseMode = "HTML"
+		kb := AuthErrorKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+		return
+	}
+
+	r.authMgr.SetPromptMsgID(userID, loadingMsg.MessageID)
+
+	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatLoginPrompt(sess.Language, loginSess.AuthURL))
+	edit.ParseMode = "HTML"
+	kb := AuthLoginKeyboard(loginSess.AuthURL, sess.Language)
+	edit.ReplyMarkup = &kb
+	_, _ = r.bot.Send(edit)
+}
+
+func (r *Router) handleAuthCodeSubmission(chatID int64, userID int64, sess *session.UserSession, rawInput string) {
+	code := auth.ExtractAuthCode(rawInput)
+	if code == "" {
+		r.sendText(chatID, "⚠️ Format kode tidak valid. Silakan salin authorization code atau link callback URL lengkap dari browser.")
+		return
+	}
+
+	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, "⏳ Memverifikasi authorization code dengan Google..."))
+	if err != nil {
+		return
+	}
+
+	acc, err := r.authMgr.SubmitCode(userID, code)
+	if err != nil {
+		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatAuthError(sess.Language, err.Error()))
+		edit.ParseMode = "HTML"
+		kb := AuthErrorKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+		return
+	}
+
+	if acc == nil {
+		acc, _ = auth.GetActiveAccount()
+	}
+	if acc == nil {
+		acc = &auth.AccountInfo{
+			Email:      "Google Account",
+			Name:       "User",
+			AuthMethod: "Google OAuth 2.0 (Consumer)",
+			IsActive:   true,
+		}
+	}
+
+	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatLoginSuccess(sess.Language, acc))
+	edit.ParseMode = "HTML"
+	kb := CloseOnlyKeyboard(sess.Language)
+	edit.ReplyMarkup = &kb
+	_, _ = r.bot.Send(edit)
+}
+
+func (r *Router) handleSignOut(chatID int64, userID int64, sess *session.UserSession) {
+	if r.authMgr.HasActiveSession(userID) {
+		r.authMgr.CancelLogin(userID)
+	}
+
+	activeAcc, _ := auth.GetActiveAccount()
+	activeEmail := ""
+	if activeAcc != nil {
+		activeEmail = activeAcc.Email
+	}
+
+	_, err := auth.SignOut()
+	if err != nil {
+		r.sendText(chatID, fmt.Sprintf("❌ Gagal sign out: %v", err))
+		return
+	}
+
+	accounts, _ := auth.ListSavedAccounts()
+	reply := tgbotapi.NewMessage(chatID, i18n.FormatSignOutSuccess(sess.Language, activeEmail))
+	reply.ParseMode = "HTML"
+	kb := AccountsKeyboard(accounts, "", sess.Language)
+	reply.ReplyMarkup = &kb
+	_, _ = r.bot.Send(reply)
+}
+
+func (r *Router) handleAccountsMenu(chatID int64, sess *session.UserSession) {
+	accounts, _ := auth.ListSavedAccounts()
+	activeAcc, _ := auth.GetActiveAccount()
+	activeEmail := ""
+	if activeAcc != nil {
+		activeEmail = activeAcc.Email
+	}
+
+	reply := tgbotapi.NewMessage(chatID, i18n.FormatAccountsList(sess.Language, activeAcc, accounts))
+	reply.ParseMode = "HTML"
+	kb := AccountsKeyboard(accounts, activeEmail, sess.Language)
+	reply.ReplyMarkup = &kb
+	_, _ = r.bot.Send(reply)
+}
+
+func (r *Router) handleAccountDetail(chatID int64, msgID int, sess *session.UserSession, email string, inPlace bool) {
+	activeAcc, _ := auth.GetActiveAccount()
+	isActive := activeAcc != nil && strings.EqualFold(activeAcc.Email, email)
+
+	var acc *auth.AccountInfo
+	if isActive {
+		acc = activeAcc
+	} else {
+		saved, err := auth.GetSavedAccount(email)
+		if err != nil {
+			r.sendText(chatID, fmt.Sprintf("❌ Akun <code>%s</code> tidak ditemukan (%v).", email, err))
+			return
+		}
+		acc = saved
+	}
+
+	text := i18n.FormatAccountDetail(sess.Language, acc)
+	kb := AccountDetailKeyboard(email, isActive, sess.Language)
+
+	if inPlace && msgID > 0 {
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
+		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+	} else {
+		reply := tgbotapi.NewMessage(chatID, text)
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = &kb
+		_, _ = r.bot.Send(reply)
+	}
+}
+
+func (r *Router) handleSwitchAccount(chatID int64, userID int64, sess *session.UserSession, email string) {
+	_, err := auth.SwitchAccount(email)
+	if err != nil {
+		r.sendText(chatID, fmt.Sprintf("❌ Gagal beralih ke akun <code>%s</code>: %v", email, err))
+		return
+	}
+
+	msgText := fmt.Sprintf("✅ <b>Berhasil Beralih Akun!</b>\nAkun Google aktif sekarang:\n👤 <code>%s</code>", email)
+	if sess.Language == "en" {
+		msgText = fmt.Sprintf("✅ <b>Switched Account Successfully!</b>\nActive Google account is now:\n👤 <code>%s</code>", email)
+	}
+
+	accounts, _ := auth.ListSavedAccounts()
+	reply := tgbotapi.NewMessage(chatID, msgText)
+	reply.ParseMode = "HTML"
+	kb := AccountsKeyboard(accounts, email, sess.Language)
+	reply.ReplyMarkup = &kb
+	_, _ = r.bot.Send(reply)
+}
+
+func (r *Router) handleDeleteAccount(chatID int64, msgID int, sess *session.UserSession, email string) {
+	err := auth.DeleteSavedAccount(email)
+	if err != nil {
+		r.sendText(chatID, fmt.Sprintf("❌ Gagal menghapus akun <code>%s</code>: %v", email, err))
+		return
+	}
+
+	accounts, _ := auth.ListSavedAccounts()
+	activeAcc, _ := auth.GetActiveAccount()
+	activeEmail := ""
+	if activeAcc != nil {
+		activeEmail = activeAcc.Email
+	}
+
+	text := i18n.FormatAccountsList(sess.Language, activeAcc, accounts)
+	kb := AccountsKeyboard(accounts, activeEmail, sess.Language)
+
+	if msgID > 0 {
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
+		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+	} else {
+		reply := tgbotapi.NewMessage(chatID, text)
+		reply.ParseMode = "HTML"
+		reply.ReplyMarkup = &kb
+		_, _ = r.bot.Send(reply)
+	}
+}
+
+func (r *Router) handleWhoami(chatID int64, sess *session.UserSession) {
+	activeAcc, err := auth.GetActiveAccount()
+	if err != nil || activeAcc == nil || activeAcc.Email == "" {
+		if sess.Language == "en" {
+			r.sendText(chatID, "ℹ️ <b>Not Logged In:</b> No active Google account found.\nUse <code>/login</code> to connect an account.")
+		} else {
+			r.sendText(chatID, "ℹ️ <b>Belum Login:</b> Tidak ada akun Google yang sedang aktif.\nGunakan <code>/login</code> untuk masuk.")
+		}
+		return
+	}
+
+	text := i18n.FormatAccountDetail(sess.Language, activeAcc)
+	kb := AccountDetailKeyboard(activeAcc.Email, true, sess.Language)
+	reply := tgbotapi.NewMessage(chatID, text)
+	reply.ParseMode = "HTML"
+	reply.ReplyMarkup = &kb
+	_, _ = r.bot.Send(reply)
 }
 
