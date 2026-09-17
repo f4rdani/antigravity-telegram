@@ -13,9 +13,20 @@ type ConversationEntry struct {
 }
 
 type TurnMessageEntry struct {
-	UserMsgID int       `json:"user_msg_id"`
-	BotMsgID  int       `json:"bot_msg_id"`
-	Timestamp time.Time `json:"timestamp"`
+	UserMsgID  int       `json:"user_msg_id,omitempty"`
+	UserMsgIDs []int     `json:"user_msg_ids,omitempty"`
+	BotMsgID   int       `json:"bot_msg_id"`
+	Timestamp  time.Time `json:"timestamp"`
+}
+
+func (e TurnMessageEntry) GetAllUserMsgIDs() []int {
+	if len(e.UserMsgIDs) > 0 {
+		return e.UserMsgIDs
+	}
+	if e.UserMsgID > 0 {
+		return []int{e.UserMsgID}
+	}
+	return nil
 }
 
 type UserSession struct {

@@ -21,12 +21,13 @@ import (
 )
 
 type ActiveTask struct {
-	UserID    int64
-	ChatID    int64
-	Prompt    string
-	StartedAt time.Time
-	Cancel    context.CancelFunc
-	IsGoal    bool
+	UserID          int64
+	ChatID          int64
+	Prompt          string
+	StartedAt       time.Time
+	Cancel          context.CancelFunc
+	IsGoal          bool
+	LastWarningTime time.Time
 }
 
 type Router struct {
@@ -35,6 +36,7 @@ type Router struct {
 	sm           *session.SessionManager
 	oneShot      *engine.OneShotRunner
 	streamRunner *engine.StreamAgentRunner
+	accumulator  *MessageAccumulator
 	taskMu       sync.Mutex
 	activeTasks  map[int64]*ActiveTask
 }
@@ -46,6 +48,7 @@ func NewRouter(cfg *config.Config, bot *tgbotapi.BotAPI, sm *session.SessionMana
 		sm:           sm,
 		oneShot:      engine.NewOneShotRunner(cfg.Agy.BinaryPath),
 		streamRunner: engine.NewStreamAgentRunner(cfg.Agy.BinaryPath),
+		accumulator:  NewMessageAccumulator(),
 		activeTasks:  make(map[int64]*ActiveTask),
 	}
 }
@@ -78,6 +81,8 @@ func (r *Router) unregisterActiveTask(userID int64) {
 }
 
 func (r *Router) cancelActiveTask(userID int64, chatID int64) bool {
+	r.accumulator.Cancel(userID)
+
 	r.taskMu.Lock()
 	task, ok := r.activeTasks[userID]
 	if ok && task != nil {
@@ -149,24 +154,37 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		if len(promptSummary) > 50 {
 			promptSummary = promptSummary[:47] + "..."
 		}
-		warningMsg := fmt.Sprintf(
-			"⚠️ <b>Antigravity sedang aktif memproses instruksi:</b>\n"+
-				"• <i>\"%s\"</i>\n"+
-				"• <b>Durasi berjalan:</b> <code>%s</code>\n\n"+
-				"⏳ <i>Harap tunggu hingga proses selesai sebelum mengirim pesan baru, atau gunakan tombol di bawah untuk membatalkan proses yang sedang berjalan.</i>",
-			renderer.EscapeHTML(promptSummary), dur.String(),
-		)
-		reply := tgbotapi.NewMessage(chatID, warningMsg)
-		reply.ParseMode = "HTML"
-		kb := ActiveTaskKeyboard(sess.Language)
-		reply.ReplyMarkup = &kb
-		_, _ = r.bot.Send(reply)
+
+		// Rate limit warning cards to avoid spamming user if multiple chunks arrive during active task
+		r.taskMu.Lock()
+		now := time.Now()
+		shouldWarn := now.Sub(task.LastWarningTime) > 2*time.Second
+		if shouldWarn {
+			task.LastWarningTime = now
+		}
+		r.taskMu.Unlock()
+
+		if shouldWarn {
+			warningMsg := fmt.Sprintf(
+				"⚠️ <b>Antigravity sedang aktif memproses instruksi:</b>\n"+
+					"• <i>\"%s\"</i>\n"+
+					"• <b>Durasi berjalan:</b> <code>%s</code>\n\n"+
+					"⏳ <i>Harap tunggu hingga proses selesai sebelum mengirim pesan baru, atau gunakan tombol di bawah untuk membatalkan proses yang sedang berjalan.</i>",
+				renderer.EscapeHTML(promptSummary), dur.String(),
+			)
+			reply := tgbotapi.NewMessage(chatID, warningMsg)
+			reply.ParseMode = "HTML"
+			kb := ActiveTaskKeyboard(sess.Language)
+			reply.ReplyMarkup = &kb
+			_, _ = r.bot.Send(reply)
+		}
 		return
 	}
 
 	// Check if message contains media/file attachments (Photo, Document, Video, Audio, Voice)
 	hasMedia := len(msg.Photo) > 0 || msg.Document != nil || msg.Video != nil || msg.Audio != nil || msg.Voice != nil
 	if hasMedia {
+		r.accumulator.Cancel(userID)
 		media, err := r.DownloadMessageMedia(msg, sess.CWD)
 		if err != nil {
 			r.sendText(chatID, fmt.Sprintf("❌ Gagal mengunduh file lampiran: %v", err))
@@ -203,26 +221,78 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		return
 	}
 
-	// Command routing
-	if strings.HasPrefix(text, "/") {
+	// Check for instant commands (bypass debounce for zero latency on control commands)
+	if IsInstantCommand(text) {
+		r.accumulator.Cancel(userID)
 		r.handleCommand(msg, sess, text)
 		return
 	}
 
-	// Default: Mode B Agent Prompt
+	// Route text prompts and multi-part inputs through the debounce accumulator
+	r.accumulator.Add(msg, sess, func(batch *AccumulatedBatch, combinedText string) {
+		r.dispatchAccumulatedMessage(batch, combinedText)
+	})
+}
+
+func formatNumber(n int) string {
+	s := fmt.Sprintf("%d", n)
+	if len(s) <= 3 {
+		return s
+	}
+	var res []string
+	for len(s) > 3 {
+		res = append([]string{s[len(s)-3:]}, res...)
+		s = s[:len(s)-3]
+	}
+	if len(s) > 0 {
+		res = append([]string{s}, res...)
+	}
+	return strings.Join(res, ",")
+}
+
+func (r *Router) dispatchAccumulatedMessage(batch *AccumulatedBatch, combinedText string) {
+	chatID := batch.ChatID
+	userID := batch.UserID
+	sess := batch.Session
+	userMsgIDs := batch.MsgIDs
+	isSplit := len(batch.Chunks) > 1
+
+	// If split messages were stitched together, notify the user
+	if isSplit {
+		totalChars := len(combinedText)
+		var notice string
+		if sess.Language == "en" {
+			notice = fmt.Sprintf("📥 <b>Long text detected (%d parts, %s characters).</b>\n⏳ <i>Merged successfully. Processing instructions...</i>", len(batch.Chunks), formatNumber(totalChars))
+		} else {
+			notice = fmt.Sprintf("📥 <b>Teks panjang terdeteksi (%d bagian, %s karakter).</b>\n⏳ <i>Berhasil digabungkan. Memproses instruksi...</i>", len(batch.Chunks), formatNumber(totalChars))
+		}
+		r.sendText(chatID, notice)
+	}
+
+	trimmed := strings.TrimSpace(combinedText)
+	if strings.HasPrefix(trimmed, "/") {
+		r.handleCommandWithIDs(batch.LastMsg, sess, trimmed, userMsgIDs)
+		return
+	}
+
+	// Default: Stream Agent prompt with all user message IDs tracked for auto-delete
 	r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
 		UserID:         userID,
-		Prompt:         text,
+		Prompt:         combinedText,
 		CWD:            sess.CWD,
 		ConversationID: sess.ActiveConversationID,
 		PermissionMode: sess.PermissionMode,
 		Model:          sess.ActiveModel,
 		Effort:         sess.ActiveEffort,
 		PrintTimeout:   r.cfg.Agy.PrintTimeout,
-	}, userMsgID)
+	}, userMsgIDs...)
 }
 
 func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession, text string) {
+	r.handleCommandWithIDs(msg, sess, text, []int{msg.MessageID})
+}
+
+func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserSession, text string, userMsgIDs []int) {
 	chatID := msg.Chat.ID
 	userID := msg.From.ID
 	parts := strings.Fields(text)
@@ -466,7 +536,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
-		}, msg.MessageID)
+		}, userMsgIDs...)
 
 	case "/sessions":
 		convs := r.sm.GetAvailableConversations(userID)
@@ -522,7 +592,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
-		}, msg.MessageID)
+		}, userMsgIDs...)
 
 	case "/goal":
 		if args == "" {
@@ -539,7 +609,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
 			IsGoal:         true,
-		}, msg.MessageID)
+		}, userMsgIDs...)
 
 	case "/autodelete":
 		if args != "" {
@@ -554,7 +624,14 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 				cleared := r.sm.ClearAllTrackedTurns(userID)
 				if len(cleared) > 0 {
 					go r.deleteTurnMessagesAsync(chatID, cleared)
-					reply := tgbotapi.NewMessage(chatID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_cleared"), len(cleared)*2))
+					totalDel := 0
+					for _, c := range cleared {
+						if c.BotMsgID > 0 {
+							totalDel++
+						}
+						totalDel += len(c.GetAllUserMsgIDs())
+					}
+					reply := tgbotapi.NewMessage(chatID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_cleared"), totalDel))
 					reply.ParseMode = "HTML"
 					reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 					_, _ = r.bot.Send(reply)
@@ -619,7 +696,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
-		}, msg.MessageID)
+		}, userMsgIDs...)
 	}
 }
 
@@ -897,7 +974,14 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		cleared := r.sm.ClearAllTrackedTurns(userID)
 		if len(cleared) > 0 {
 			go r.deleteTurnMessagesAsync(chatID, cleared)
-			toast := tgbotapi.NewCallback(cb.ID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_cleared"), len(cleared)*2))
+			totalDel := 0
+			for _, c := range cleared {
+				if c.BotMsgID > 0 {
+					totalDel++
+				}
+				totalDel += len(c.GetAllUserMsgIDs())
+			}
+			toast := tgbotapi.NewCallback(cb.ID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_cleared"), totalDel))
 			_, _ = r.bot.Request(toast)
 		} else {
 			toast := tgbotapi.NewCallback(cb.ID, i18n.T(sess.Language, "autodelete_already_empty"))
@@ -920,9 +1004,10 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	case strings.HasPrefix(data, "set_lang:"):
 		newLang := strings.TrimPrefix(data, "set_lang:")
 		r.sm.SetLanguage(userID, newLang)
-		sess = r.sm.GetSession(userID, chatID)
-		toast := tgbotapi.NewCallback(cb.ID, i18n.T(sess.Language, "lang_changed"))
+		toast := tgbotapi.NewCallback(cb.ID, i18n.T(newLang, "lang_changed"))
 		_, _ = r.bot.Request(toast)
+
+		sess = r.sm.GetSession(userID, chatID)
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.GetLanguageMenuText(sess.Language))
 		edit.ParseMode = "HTML"
 		kb := LanguageSelectionKeyboard(sess.Language)
@@ -1010,9 +1095,11 @@ func (r *Router) deleteTurnMessagesAsync(chatID int64, entries []session.TurnMes
 			delBot := tgbotapi.NewDeleteMessage(chatID, e.BotMsgID)
 			_, _ = r.bot.Request(delBot)
 		}
-		if e.UserMsgID > 0 {
-			delUser := tgbotapi.NewDeleteMessage(chatID, e.UserMsgID)
-			_, _ = r.bot.Request(delUser)
+		for _, uID := range e.GetAllUserMsgIDs() {
+			if uID > 0 {
+				delUser := tgbotapi.NewDeleteMessage(chatID, uID)
+				_, _ = r.bot.Request(delUser)
+			}
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -1107,7 +1194,7 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 	_, _ = r.bot.Send(edit)
 }
 
-func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, userMsgID int) {
+func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, userMsgIDs ...int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -1149,12 +1236,12 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			break
 		}
 
-		turnUserMsgID := 0
+		var turnUserMsgIDs []int
 		if iteration == 1 {
-			turnUserMsgID = userMsgID
+			turnUserMsgIDs = userMsgIDs
 		}
 
-		result, err := r.runSingleStreamTurn(ctx, chatID, sess, opts, iteration, turnUserMsgID)
+		result, err := r.runSingleStreamTurn(ctx, chatID, sess, opts, iteration, turnUserMsgIDs)
 		if ctx.Err() != nil {
 			break
 		}
@@ -1191,7 +1278,7 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 	}
 }
 
-func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, iteration int, userMsgID int) (*engine.ResultPayload, error) {
+func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, iteration int, userMsgIDs []int) (*engine.ResultPayload, error) {
 	initialText := "💭 <i>Menganalisis instruksi...</i>"
 	if sess.Language == "en" {
 		initialText = "💭 <i>Analyzing instructions...</i>"
@@ -1415,7 +1502,7 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 
 	// Auto-delete turn tracking: record turn and evict expired messages in Telegram
 	if finalBotMsgID > 0 {
-		toDelete := r.sm.RecordTurnMessages(opts.UserID, userMsgID, finalBotMsgID)
+		toDelete := r.sm.RecordTurnMessages(opts.UserID, userMsgIDs, finalBotMsgID)
 		if len(toDelete) > 0 {
 			go r.deleteTurnMessagesAsync(chatID, toDelete)
 		}

@@ -22,12 +22,12 @@ func TestI18nTranslations(t *testing.T) {
 	}
 
 	// Test GetHelpText
-	helpID := GetHelpText("id", "v1.0.9")
+	helpID := GetHelpText("id", "v1.0.10")
 	if !strings.Contains(helpID, "Kirim teks biasa") {
 		t.Errorf("helpID missing Indonesian content")
 	}
 
-	helpEN := GetHelpText("en", "v1.0.9")
+	helpEN := GetHelpText("en", "v1.0.10")
 	if !strings.Contains(helpEN, "Send plain text") {
 		t.Errorf("helpEN missing English content")
 	}

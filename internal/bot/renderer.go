@@ -11,7 +11,7 @@ import (
 	"agy-tele/internal/session"
 )
 
-const AppVersion = "v1.0.9"
+const AppVersion = "v1.0.10"
 
 func FormatHelp(lang string) string {
 	return i18n.GetHelpText(lang, AppVersion)

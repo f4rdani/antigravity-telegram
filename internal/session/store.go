@@ -220,10 +220,10 @@ func (sm *SessionManager) SetMaxTelegramTurns(userID int64, maxTurns int) {
 	go func() { _ = sm.SaveAll() }()
 }
 
-// RecordTurnMessages appends a completed turn (userMsgID + botMsgID).
+// RecordTurnMessages appends a completed turn (userMsgIDs + botMsgID).
 // If tracked turns exceed MaxTelegramTurns (when limit > 0), excess turns are evicted
 // and returned so the caller can delete them from Telegram.
-func (sm *SessionManager) RecordTurnMessages(userID int64, userMsgID, botMsgID int) []TurnMessageEntry {
+func (sm *SessionManager) RecordTurnMessages(userID int64, userMsgIDs []int, botMsgID int) []TurnMessageEntry {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -232,10 +232,16 @@ func (sm *SessionManager) RecordTurnMessages(userID int64, userMsgID, botMsgID i
 		return nil
 	}
 
+	primaryID := 0
+	if len(userMsgIDs) > 0 {
+		primaryID = userMsgIDs[0]
+	}
+
 	sess.TrackedTurns = append(sess.TrackedTurns, TurnMessageEntry{
-		UserMsgID: userMsgID,
-		BotMsgID:  botMsgID,
-		Timestamp: time.Now(),
+		UserMsgID:  primaryID,
+		UserMsgIDs: userMsgIDs,
+		BotMsgID:   botMsgID,
+		Timestamp:  time.Now(),
 	})
 	sess.LastActiveTime = time.Now()
 
