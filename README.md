@@ -70,6 +70,10 @@ Running autonomous coding sessions or monitoring long-running agent tasks (`/pla
   - Automatically archives tokens in `~/.gemini/antigravity-cli/accounts/<email>.json` upon logout or account switch.
   - Interactive OAuth 2.0 consumer login bridge powered by a virtual pseudo-terminal (PTY), displaying direct Google authorization links and accepting codes or raw redirect callback URLs.
   - Informative error handling and automatic recovery for invalid or expired OAuth codes.
+- **Smart Error Classification & Sticky Error Prevention**:
+  - Automatically parses "Eligibility Check Failed" errors, extracting verification URLs and presenting them as both clickable HTML links and dedicated Telegram inline buttons (`[ 🌐 Buka Link Verifikasi ]`).
+  - Auto-resets conversation sessions on account switch, logout, or quota limits (`RESOURCE_EXHAUSTED`, `code 429`), eliminating the "sticky error" bug where previous session errors persist across account changes.
+  - Filters out transient step retries (e.g. temporary 503 capacity warnings) from successful final responses, preventing false alarm badges on completed tasks.
 - **Single-Tenant Security**: Whitelists authorized Telegram User IDs (`allowed_user_ids`). Unauthenticated users are completely blocked.
 
 ---

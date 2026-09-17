@@ -148,6 +148,10 @@ func (t *MessageThrottler) Stop() string {
 }
 
 func (t *MessageThrottler) Finalize(finalText string, footer string, fallbackActions []string) {
+	t.FinalizeWithKeyboard(finalText, footer, fallbackActions, nil)
+}
+
+func (t *MessageThrottler) FinalizeWithKeyboard(finalText string, footer string, fallbackActions []string, kb *tgbotapi.InlineKeyboardMarkup) {
 	t.Stop()
 
 	t.mu.Lock()
@@ -179,29 +183,48 @@ func (t *MessageThrottler) Finalize(finalText string, footer string, fallbackAct
 	if len(formatted) <= maxChars {
 		editMsg := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, formatted)
 		editMsg.ParseMode = "HTML"
+		if kb != nil {
+			editMsg.ReplyMarkup = kb
+		}
 		_, err := t.bot.Send(editMsg)
 		if err != nil {
 			plainText := renderer.StripHTML(formatted)
 			editPlain := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, plainText)
+			if kb != nil {
+				editPlain.ReplyMarkup = kb
+			}
 			_, _ = t.bot.Send(editPlain)
 		}
 	} else {
 		chunks := splitIntoChunks(formatted, maxChars)
 		for i, ch := range chunks {
+			isLast := (i == len(chunks)-1)
 			if i == 0 {
 				editMsg := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, ch)
 				editMsg.ParseMode = "HTML"
+				if isLast && kb != nil {
+					editMsg.ReplyMarkup = kb
+				}
 				_, err := t.bot.Send(editMsg)
 				if err != nil {
 					editPlain := tgbotapi.NewEditMessageText(t.chatID, t.activeMessage, renderer.StripHTML(ch))
+					if isLast && kb != nil {
+						editPlain.ReplyMarkup = kb
+					}
 					_, _ = t.bot.Send(editPlain)
 				}
 			} else {
 				newMsg := tgbotapi.NewMessage(t.chatID, ch)
 				newMsg.ParseMode = "HTML"
+				if isLast && kb != nil {
+					newMsg.ReplyMarkup = kb
+				}
 				_, err := t.bot.Send(newMsg)
 				if err != nil {
 					newPlain := tgbotapi.NewMessage(t.chatID, renderer.StripHTML(ch))
+					if isLast && kb != nil {
+						newPlain.ReplyMarkup = kb
+					}
 					_, _ = t.bot.Send(newPlain)
 				}
 			}

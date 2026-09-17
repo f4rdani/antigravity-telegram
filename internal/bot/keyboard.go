@@ -422,3 +422,42 @@ func AuthErrorKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 		),
 	)
 }
+
+func ErrorActionKeyboard(urls []string, isEligibility bool, isQuota bool, lang string) tgbotapi.InlineKeyboardMarkup {
+	var rows [][]tgbotapi.InlineKeyboardButton
+
+	for i, u := range urls {
+		if i >= 2 {
+			break
+		}
+		btnText := i18n.T(lang, "btn_open_link")
+		if isEligibility {
+			btnText = i18n.T(lang, "btn_open_verify_link")
+		}
+		if len(urls) > 1 {
+			btnText = fmt.Sprintf("%s (%d)", btnText, i+1)
+		}
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonURL(btnText, u),
+		))
+	}
+
+	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_accounts"), "cmd_accounts_menu"),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_new_session"), "cmd_new"),
+	))
+
+	if isQuota {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_quota"), "cmd_usage"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		))
+	} else {
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		))
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(rows...)
+}
+

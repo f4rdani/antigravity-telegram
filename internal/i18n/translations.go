@@ -96,6 +96,8 @@ var translations = map[string]map[string]string{
 		"btn_cancel_login":           "❌ Batalkan Login",
 		"btn_retry_login":            "🔄 Coba Login Baru",
 		"btn_saved_accounts":         "👥 Daftar Akun Tersimpan",
+		"btn_open_verify_link":       "🌐 Buka Link Verifikasi",
+		"btn_open_link":              "🌐 Buka Tautan",
 	},
 	"en": {
 		"err_occurred":               "An error occurred:",
@@ -148,6 +150,8 @@ var translations = map[string]map[string]string{
 		"btn_cancel_login":           "❌ Cancel Login",
 		"btn_retry_login":            "🔄 Try Login Again",
 		"btn_saved_accounts":         "👥 Saved Accounts List",
+		"btn_open_verify_link":       "🌐 Open Verification Link",
+		"btn_open_link":              "🌐 Open Link",
 	},
 }
 

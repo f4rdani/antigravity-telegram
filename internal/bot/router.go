@@ -489,7 +489,11 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 			}
 		}
 		r.sm.ResetConversation(userID)
-		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nSiap memulai sesi percakapan baru di workspace:\n<code>%s</code>", sess.CWD))
+		resetMsg := fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nSiap memulai sesi percakapan baru di workspace:\n<code>%s</code>", sess.CWD)
+		if sess.Language == "en" {
+			resetMsg = fmt.Sprintf("🔄 <b>Conversation Session Reset</b>\nReady to start fresh in workspace:\n<code>%s</code>", sess.CWD)
+		}
+		reply := tgbotapi.NewMessage(chatID, resetMsg)
 		reply.ParseMode = "HTML"
 		reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 		_, _ = r.bot.Send(reply)
@@ -1099,7 +1103,11 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 
 	case data == "cmd_new":
 		r.sm.ResetConversation(userID)
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nWorkspace aktif: <code>%s</code>", sess.CWD))
+		resetMsg := fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nWorkspace aktif: <code>%s</code>", sess.CWD)
+		if sess.Language == "en" {
+			resetMsg = fmt.Sprintf("🔄 <b>Conversation Session Reset</b>\nActive workspace: <code>%s</code>", sess.CWD)
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, resetMsg)
 		edit.ParseMode = "HTML"
 		kb := BackAndCloseKeyboard("cmd_help_menu", sess.Language)
 		edit.ReplyMarkup = &kb
@@ -1247,25 +1255,42 @@ func (r *Router) executeOneShot(chatID int64, cwd string, title string, command 
 	}()
 	defer close(stopTyping)
 
-	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("⏳ Menjalankan <code>%s</code>...", command)))
+	loadingText := fmt.Sprintf("⏳ Menjalankan <code>%s</code>...", command)
+	if lang == "en" {
+		loadingText = fmt.Sprintf("⏳ Executing <code>%s</code>...", command)
+	}
+	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, loadingText))
 	if err != nil {
 		return
 	}
 
 	out, err := r.oneShot.Run(ctx, cwd, command)
-	kb := CloseOnlyKeyboard(lang)
-	if err != nil {
-		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, fmt.Sprintf("❌ Error menjalankan <code>%s</code>:\n<pre>%s</pre>", command, renderer.EscapeHTML(err.Error())))
+	lowerOut := strings.ToLower(out)
+	if err != nil || strings.Contains(lowerOut, "eligibility check failed") || strings.Contains(lowerOut, "resource_exhausted") {
+		rawErr := ""
+		if err != nil {
+			rawErr = err.Error()
+		} else {
+			rawErr = out
+		}
+		pe := i18n.ParseError(rawErr)
+		errKb := ErrorActionKeyboard(pe.ExtractedURLs, pe.IsEligibility, pe.IsQuotaLimit, lang)
+		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatErrorCard(lang, pe))
 		edit.ParseMode = "HTML"
-		edit.ReplyMarkup = &kb
+		edit.ReplyMarkup = &errKb
 		_, _ = r.bot.Send(edit)
 		return
 	}
 
 	if out == "" {
-		out = "(Output kosong)"
+		if lang == "en" {
+			out = "(Empty output)"
+		} else {
+			out = "(Output kosong)"
+		}
 	}
 
+	kb := CloseOnlyKeyboard(lang)
 	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, FormatCodeBlock(title, out))
 	edit.ParseMode = "HTML"
 	edit.ReplyMarkup = &kb
@@ -1292,24 +1317,41 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 	}()
 	defer close(stopTyping)
 
-	loadingEdit := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("⏳ Menjalankan <code>%s</code>...", command))
+	loadingText := fmt.Sprintf("⏳ Menjalankan <code>%s</code>...", command)
+	if lang == "en" {
+		loadingText = fmt.Sprintf("⏳ Executing <code>%s</code>...", command)
+	}
+	loadingEdit := tgbotapi.NewEditMessageText(chatID, messageID, loadingText)
 	loadingEdit.ParseMode = "HTML"
 	_, _ = r.bot.Send(loadingEdit)
 
 	out, err := r.oneShot.Run(ctx, cwd, command)
-	kb := RefreshAndBackKeyboard(refreshCmd, "cmd_help_menu", lang)
-	if err != nil {
-		edit := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("❌ Error menjalankan <code>%s</code>:\n<pre>%s</pre>", command, renderer.EscapeHTML(err.Error())))
+	lowerOut := strings.ToLower(out)
+	if err != nil || strings.Contains(lowerOut, "eligibility check failed") || strings.Contains(lowerOut, "resource_exhausted") {
+		rawErr := ""
+		if err != nil {
+			rawErr = err.Error()
+		} else {
+			rawErr = out
+		}
+		pe := i18n.ParseError(rawErr)
+		errKb := ErrorActionKeyboard(pe.ExtractedURLs, pe.IsEligibility, pe.IsQuotaLimit, lang)
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, i18n.FormatErrorCard(lang, pe))
 		edit.ParseMode = "HTML"
-		edit.ReplyMarkup = &kb
+		edit.ReplyMarkup = &errKb
 		_, _ = r.bot.Send(edit)
 		return
 	}
 
 	if out == "" {
-		out = "(Output kosong)"
+		if lang == "en" {
+			out = "(Empty output)"
+		} else {
+			out = "(Output kosong)"
+		}
 	}
 
+	kb := RefreshAndBackKeyboard(refreshCmd, "cmd_help_menu", lang)
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, FormatCodeBlock(title, out))
 	edit.ParseMode = "HTML"
 	edit.ReplyMarkup = &kb
@@ -1367,7 +1409,7 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 		if ctx.Err() != nil {
 			break
 		}
-		if err != nil {
+		if err != nil || (result != nil && result.Status == "ERROR") {
 			break
 		}
 
@@ -1520,23 +1562,10 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 
 	footer := ""
 	finalText := ""
-	if result != nil {
-		footer = FormatResultFooter(result)
-		finalText = result.Response
-		if result.ConversationID != "" {
-			lastConvID = result.ConversationID
-			r.sm.UpdateConversation(opts.UserID, lastConvID, "")
-		}
+	var errorDetails *i18n.ParsedError
+	var actionKb *tgbotapi.InlineKeyboardMarkup
 
-		if result.Error != "" {
-			errPrefix := i18n.T(sess.Language, "err_occurred")
-			if strings.TrimSpace(finalText) == "" {
-				finalText = fmt.Sprintf("❌ <b>%s</b>\n%s", errPrefix, renderer.EscapeHTML(result.Error))
-			} else {
-				finalText = fmt.Sprintf("%s\n\n⚠️ <i>Peringatan / Error: %s</i>", finalText, renderer.EscapeHTML(result.Error))
-			}
-		}
-	} else if err != nil {
+	if err != nil {
 		if ctx.Err() != nil {
 			if sess.Language == "en" {
 				finalText = "🛑 <b>Task stopped by user.</b>"
@@ -1544,8 +1573,43 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 				finalText = "🛑 <b>Tugas dihentikan oleh pengguna.</b>"
 			}
 		} else {
-			errPrefix := i18n.T(sess.Language, "err_occurred")
-			finalText = fmt.Sprintf("❌ <b>%s</b>\n%s", errPrefix, renderer.EscapeHTML(err.Error()))
+			errorDetails = i18n.ParseError(err.Error())
+			finalText = i18n.FormatErrorCard(sess.Language, errorDetails)
+			kb := ErrorActionKeyboard(errorDetails.ExtractedURLs, errorDetails.IsEligibility, errorDetails.IsQuotaLimit, sess.Language)
+			actionKb = &kb
+			if errorDetails.IsQuotaLimit || errorDetails.IsEligibility || errorDetails.IsAuth {
+				r.sm.ResetConversation(opts.UserID)
+			}
+		}
+	} else if result != nil {
+		lowerResp := strings.ToLower(result.Response)
+		isEligibilityInResp := strings.Contains(lowerResp, "eligibility check failed") || strings.Contains(lowerResp, "not eligible")
+
+		if result.Status == "ERROR" || isEligibilityInResp || (result.Error != "" && strings.TrimSpace(result.Response) == "") {
+			rawErr := result.Error
+			if isEligibilityInResp && (rawErr == "" || !strings.Contains(strings.ToLower(rawErr), "eligibility")) {
+				rawErr = result.Response
+			} else if rawErr == "" {
+				rawErr = result.Response
+			}
+			if rawErr == "" {
+				rawErr = "Unknown execution error"
+			}
+			errorDetails = i18n.ParseError(rawErr)
+			finalText = i18n.FormatErrorCard(sess.Language, errorDetails)
+			kb := ErrorActionKeyboard(errorDetails.ExtractedURLs, errorDetails.IsEligibility, errorDetails.IsQuotaLimit, sess.Language)
+			actionKb = &kb
+			if errorDetails.IsQuotaLimit || errorDetails.IsEligibility || errorDetails.IsAuth {
+				r.sm.ResetConversation(opts.UserID)
+			}
+		} else {
+			// Successful response: do not append transient step retry errors
+			footer = FormatResultFooter(result)
+			finalText = result.Response
+			if result.ConversationID != "" {
+				lastConvID = result.ConversationID
+				r.sm.UpdateConversation(opts.UserID, lastConvID, "")
+			}
 		}
 	}
 
@@ -1559,7 +1623,7 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 	var finalBotMsgID int
 	if started && savedBuffer != nil {
 		activityTracker.Delete()
-		savedBuffer.Finalize(finalText, footer, actions)
+		savedBuffer.FinalizeWithKeyboard(finalText, footer, actions, actionKb)
 		finalBotMsgID = savedBuffer.MessageID()
 	} else {
 		text := finalText
@@ -1594,11 +1658,17 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 		if trackerMsgID != 0 {
 			edit := tgbotapi.NewEditMessageText(chatID, trackerMsgID, formatted)
 			edit.ParseMode = "HTML"
+			if actionKb != nil {
+				edit.ReplyMarkup = actionKb
+			}
 			if _, sendErr := r.bot.Send(edit); sendErr == nil {
 				edited = true
 				finalBotMsgID = trackerMsgID
 			} else {
 				editPlain := tgbotapi.NewEditMessageText(chatID, trackerMsgID, renderer.StripHTML(formatted))
+				if actionKb != nil {
+					editPlain.ReplyMarkup = actionKb
+				}
 				if _, sendPlain := r.bot.Send(editPlain); sendPlain == nil {
 					edited = true
 					finalBotMsgID = trackerMsgID
@@ -1610,11 +1680,17 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 			activityTracker.Delete()
 			msg := tgbotapi.NewMessage(chatID, formatted)
 			msg.ParseMode = "HTML"
+			if actionKb != nil {
+				msg.ReplyMarkup = actionKb
+			}
 			if sentMsg, sendErr := r.bot.Send(msg); sendErr == nil {
 				finalBotMsgID = sentMsg.MessageID
 			} else {
 				plain := renderer.StripHTML(formatted)
 				msgPlain := tgbotapi.NewMessage(chatID, plain)
+				if actionKb != nil {
+					msgPlain.ReplyMarkup = actionKb
+				}
 				if sentPlain, errPlain := r.bot.Send(msgPlain); errPlain == nil {
 					finalBotMsgID = sentPlain.MessageID
 				}
@@ -1772,6 +1848,7 @@ func (r *Router) handleAuthCodeSubmission(chatID int64, userID int64, sess *sess
 		}
 	}
 
+	r.sm.ResetConversation(userID)
 	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatLoginSuccess(sess.Language, acc))
 	edit.ParseMode = "HTML"
 	kb := CloseOnlyKeyboard(sess.Language)
@@ -1796,6 +1873,7 @@ func (r *Router) handleSignOut(chatID int64, userID int64, sess *session.UserSes
 		return
 	}
 
+	r.sm.ResetConversation(userID)
 	accounts, _ := auth.ListSavedAccounts()
 	reply := tgbotapi.NewMessage(chatID, i18n.FormatSignOutSuccess(sess.Language, activeEmail))
 	reply.ParseMode = "HTML"
@@ -1858,6 +1936,7 @@ func (r *Router) handleSwitchAccount(chatID int64, userID int64, sess *session.U
 		return
 	}
 
+	r.sm.ResetConversation(userID)
 	msgText := fmt.Sprintf("✅ <b>Berhasil Beralih Akun!</b>\nAkun Google aktif sekarang:\n👤 <code>%s</code>", email)
 	if sess.Language == "en" {
 		msgText = fmt.Sprintf("✅ <b>Switched Account Successfully!</b>\nActive Google account is now:\n👤 <code>%s</code>", email)
