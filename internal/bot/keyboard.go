@@ -4,40 +4,122 @@ import (
 	"fmt"
 
 	"agy-tele/internal/artifact"
+	"agy-tele/internal/i18n"
 	"agy-tele/internal/session"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-func QuickActionKeyboard() tgbotapi.InlineKeyboardMarkup {
+func QuickActionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📂 Resume Sesi", "cmd_resume_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("📑 Artifacts & Plans", "cmd_artifact_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_resume"), "cmd_resume_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_artifacts"), "cmd_artifact_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📊 Quota/Usage", "cmd_usage"),
-			tgbotapi.NewInlineKeyboardButtonData("💰 Credits", "cmd_credits"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_quota"), "cmd_usage"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_credits"), "cmd_credits"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🧠 Ganti Model", "cmd_model_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("⚡ Set Effort", "cmd_effort_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_model"), "cmd_model_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_effort"), "cmd_effort_menu"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🧰 Daftar Skills", "cmd_skills"),
-			tgbotapi.NewInlineKeyboardButtonData("⚙️ Status & CWD", "cmd_status"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_skills"), "cmd_skills"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_status"), "cmd_status"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔒 Atur Permission", "cmd_perm_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("🔄 Sesi Baru", "cmd_new"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_permission"), "cmd_perm_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_new_session"), "cmd_new"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Menu", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_autodelete"), "cmd_autodelete_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_language"), "cmd_lang_menu"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close_menu"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func ResumeKeyboard(convs []session.AvailableConversation, activeID string) tgbotapi.InlineKeyboardMarkup {
+func StatusActionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_list_files"), "cmd_ls_cwd"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_refresh"), "cmd_status"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		),
+	)
+}
+
+func AutoDeleteKeyboard(lang string, currentLimit int) tgbotapi.InlineKeyboardMarkup {
+	t20 := "20 Turns"
+	if currentLimit == 20 {
+		t20 = "✅ 20 Turns"
+	}
+	t50 := "50 Turns"
+	if currentLimit == 50 {
+		t50 = "✅ 50 Turns"
+	}
+	t100 := "100 Turns"
+	if currentLimit == 100 {
+		t100 = "✅ 100 Turns"
+	}
+
+	tOff := "❌ Nonaktif (Off)"
+	if i18n.NormalizeLang(lang) == "en" {
+		tOff = "❌ Disabled (Off)"
+	}
+	if currentLimit <= 0 {
+		tOff = "✅ " + tOff
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(t20, "set_autodelete:20"),
+			tgbotapi.NewInlineKeyboardButtonData(t50, "set_autodelete:50"),
+			tgbotapi.NewInlineKeyboardButtonData(t100, "set_autodelete:100"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(tOff, "set_autodelete:0"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_clean_now"), "cmd_clean_chat_now"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		),
+	)
+}
+
+func LanguageSelectionKeyboard(currentLang string) tgbotapi.InlineKeyboardMarkup {
+	l := i18n.NormalizeLang(currentLang)
+	idText := "🇮🇩 Bahasa Indonesia"
+	enText := "🇬🇧 English"
+
+	if l == "id" {
+		idText = "✅ 🇮🇩 Bahasa Indonesia"
+	} else if l == "en" {
+		enText = "✅ 🇬🇧 English"
+	}
+
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(idText, "set_lang:id"),
+			tgbotapi.NewInlineKeyboardButtonData(enText, "set_lang:en"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(l, "btn_back_menu"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(l, "btn_close"), "cmd_delete_msg"),
+		),
+	)
+}
+
+func ResumeKeyboard(convs []session.AvailableConversation, activeID string, lang string) tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
 
 	for i, c := range convs {
@@ -55,25 +137,40 @@ func ResumeKeyboard(convs []session.AvailableConversation, activeID string) tgbo
 		))
 	}
 
+	newSessionText := "➕ Sesi Baru"
+	if i18n.NormalizeLang(lang) == "en" {
+		newSessionText = "➕ New Session"
+	}
+
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("➕ Sesi Baru", "cmd_new"),
-		tgbotapi.NewInlineKeyboardButtonData("« Menu", "cmd_help_menu"),
-		tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+		tgbotapi.NewInlineKeyboardButtonData(newSessionText, "cmd_new"),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), "cmd_help_menu"),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 	))
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
-func ResumeConfirmedKeyboard(convID string) tgbotapi.InlineKeyboardMarkup {
+func ResumeConfirmedKeyboard(convID string, lang string) tgbotapi.InlineKeyboardMarkup {
+	chooseOtherText := "« Pilih Sesi Lain"
+	if i18n.NormalizeLang(lang) == "en" {
+		chooseOtherText = "« Choose Another Session"
+	}
+
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Pilih Sesi Lain", "cmd_resume_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(chooseOtherText, "cmd_resume_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func ModelSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
+func ModelSelectionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
+	defaultText := "🔄 Default (Otomatis agy)"
+	if i18n.NormalizeLang(lang) == "en" {
+		defaultText = "🔄 Default (agy automatic)"
+	}
+
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("Gemini 3.8 Flash (High)", "set_model:gemini-3.8-flash-high"),
@@ -94,75 +191,88 @@ func ModelSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData("GPT-OSS 120B (Medium)", "set_model:gpt-oss-120b-medium"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔄 Default (Otomatis agy)", "set_model:default"),
+			tgbotapi.NewInlineKeyboardButtonData(defaultText, "set_model:default"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali", "cmd_help_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func EffortSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
+func EffortSelectionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
+	lowText := "Low (Cepat)"
+	highText := "High (Mendalam)"
+	if i18n.NormalizeLang(lang) == "en" {
+		lowText = "Low (Fast)"
+		highText = "High (Deep)"
+	}
+
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("Low (Cepat)", "set_effort:low"),
+			tgbotapi.NewInlineKeyboardButtonData(lowText, "set_effort:low"),
 			tgbotapi.NewInlineKeyboardButtonData("Medium", "set_effort:medium"),
-			tgbotapi.NewInlineKeyboardButtonData("High (Mendalam)", "set_effort:high"),
+			tgbotapi.NewInlineKeyboardButtonData(highText, "set_effort:high"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali", "cmd_help_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func PermissionSelectionKeyboard() tgbotapi.InlineKeyboardMarkup {
+func PermissionSelectionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
+	autoText := "🟢 Auto-Approve (Hands-Free)"
+	askText := "🟡 Ask User (Konfirmasi Tiap Aksi)"
+	if i18n.NormalizeLang(lang) == "en" {
+		askText = "🟡 Ask User (Confirm Every Action)"
+	}
+
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🟢 Auto-Approve (Hands-Free)", "set_perm:auto"),
+			tgbotapi.NewInlineKeyboardButtonData(autoText, "set_perm:auto"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🟡 Ask User (Konfirmasi Tiap Aksi)", "set_perm:ask"),
+			tgbotapi.NewInlineKeyboardButtonData(askText, "set_perm:ask"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali", "cmd_help_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func BackAndCloseKeyboard(backCmd string) tgbotapi.InlineKeyboardMarkup {
+func BackAndCloseKeyboard(backCmd string, lang string) tgbotapi.InlineKeyboardMarkup {
 	if backCmd == "" {
 		backCmd = "cmd_help_menu"
 	}
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali ke Menu", backCmd),
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), backCmd),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func CloseOnlyKeyboard() tgbotapi.InlineKeyboardMarkup {
+func CloseOnlyKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Pesan Ini", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func RefreshAndBackKeyboard(refreshCmd string, backCmd string) tgbotapi.InlineKeyboardMarkup {
+func RefreshAndBackKeyboard(refreshCmd string, backCmd string, lang string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🔄 Refresh", refreshCmd),
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali", backCmd),
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_refresh"), refreshCmd),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back"), backCmd),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func ArtifactListKeyboard(items []artifact.Item) tgbotapi.InlineKeyboardMarkup {
+func ArtifactListKeyboard(items []artifact.Item, lang string) tgbotapi.InlineKeyboardMarkup {
 	var rows [][]tgbotapi.InlineKeyboardButton
 
 	for i, item := range items {
@@ -181,38 +291,49 @@ func ArtifactListKeyboard(items []artifact.Item) tgbotapi.InlineKeyboardMarkup {
 	}
 
 	rows = append(rows, tgbotapi.NewInlineKeyboardRow(
-		tgbotapi.NewInlineKeyboardButtonData("🔄 Refresh", "cmd_artifact_menu"),
-		tgbotapi.NewInlineKeyboardButtonData("« Menu", "cmd_help_menu"),
-		tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+		tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_refresh"), "cmd_artifact_menu"),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		)[0],
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		)[1],
 	))
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
 
-func ArtifactDetailKeyboard(item artifact.Item) tgbotapi.InlineKeyboardMarkup {
+func ArtifactDetailKeyboard(item artifact.Item, lang string) tgbotapi.InlineKeyboardMarkup {
+	backListText := "« Kembali ke Daftar"
+	if i18n.NormalizeLang(lang) == "en" {
+		backListText = "« Back to List"
+	}
+
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("📖 Buka Isi File", "art_open:"+item.ID),
-			tgbotapi.NewInlineKeyboardButtonData("📥 Unduh Dokumen", "art_download:"+item.ID),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_open_file"), "art_open:"+item.ID),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_download_file"), "art_download:"+item.ID),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("✅ Approve & Eksekusi", "art_approve:"+item.ID),
-			tgbotapi.NewInlineKeyboardButtonData("❌ Reject / Revisi", "art_reject:"+item.ID),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_approve"), "art_approve:"+item.ID),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_reject"), "art_reject:"+item.ID),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("« Kembali ke Daftar", "cmd_artifact_menu"),
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(backListText, "cmd_artifact_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }
 
-func ActiveTaskKeyboard() tgbotapi.InlineKeyboardMarkup {
+func ActiveTaskKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🛑 Hentikan Tugas Aktif", "cmd_cancel_active_task"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_cancel_task"), "cmd_cancel_active_task"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			tgbotapi.NewInlineKeyboardButtonData("🗑️ Tutup Pemberitahuan", "cmd_delete_msg"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
 }

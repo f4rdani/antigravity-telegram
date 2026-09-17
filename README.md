@@ -58,6 +58,9 @@ Running autonomous coding sessions or monitoring long-running agent tasks (`/pla
 - **Rich Markdown & Table Rendering**:
   - Automatically transforms standard Markdown tables into beautiful, aligned Unicode box tables (`┌─┬─┐...`) inside `<pre>` blocks, supporting smooth horizontal scrolling on mobile devices without layout breaking.
   - Full support for native Telegram 7.0+ `<blockquote>...</blockquote>` quotes and formatted horizontal dividers.
+- **Telegram Chat Auto-Delete (`/autodelete`)**: Automatically evicts older message turns in Telegram chat when exceeding a configurable threshold (default: 50 turns; customizable: 20, 50, 100, or disabled/clean now). Keeps mobile Telegram apps fast and lag-free while keeping all server-side Antigravity transcripts and session histories 100% safe and intact.
+- **Multi-Language Support (`/lang`)**: Seamless switching between Bahasa Indonesia (`id`) and English (`en`) for all interactive dashboards, status cards, progress badges, and alerts.
+- **Interactive Workspace & Status Actions (`/status`)**: Interactive status dashboard with instant mobile tactile toast feedback, quick directory file browsing (`[ 📁 List File (/ls) ]`), and in-place refresh.
 - **Throttled Zero-Flicker Streaming**: Live streaming with token delta throttling (1200ms) and in-place status adoption (`AdoptMessageID`), eliminating chat jitter and avoiding Telegram API `HTTP 429`.
 - **Zero Chat Clutter (In-Place UI)**: Interactive dashboards and configuration menus edit in-place and include `[ 🗑️ Tutup ]` instant dismissal buttons.
 - **Auto-Sanitasi Link Path Lokal**: Automatically converts internal Antigravity `[`path`](file:///path)` links into crisp, monospaced code badges (`<code>path</code>`).
@@ -153,6 +156,8 @@ sequenceDiagram
 | `/artifact`, `/artifacts` | Opens interactive browser for generated plans, architecture designs, and documents. |
 | `/permission [auto\|ask]` | Toggles tool permissions: `auto` (hands-free) or `ask` (manual confirmation). |
 | `/status` | Displays full runtime daemon state, workspace, active model, and permission mode. |
+| `/autodelete [limit]` | Configures auto-deletion limit for Telegram messages (`20`, `50`, `100`, `off`, or `clean`). |
+| `/lang [id\|en]` | Switches interface language between Bahasa Indonesia (`id`) and English (`en`). |
 | `/file <path>` | Sends a file from the server workspace directly as a Telegram document. |
 
 ---

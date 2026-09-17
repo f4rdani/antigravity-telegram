@@ -38,6 +38,17 @@ func (sm *SessionManager) load() error {
 	}
 
 	sm.sessions = loaded
+	for _, sess := range sm.sessions {
+		if sess.Language == "" {
+			sess.Language = "id"
+		}
+		if sess.MaxTelegramTurns == 0 {
+			sess.MaxTelegramTurns = 50
+		}
+		if sess.TrackedTurns == nil {
+			sess.TrackedTurns = make([]TurnMessageEntry, 0)
+		}
+	}
 	return nil
 }
 
@@ -72,6 +83,9 @@ func (sm *SessionManager) GetSession(userID int64, chatID int64) *UserSession {
 			PermissionMode:       sm.defaultPerm,
 			LastActiveTime:       time.Now(),
 			RecentConversations:  make([]ConversationEntry, 0),
+			Language:             "id",
+			MaxTelegramTurns:     50,
+			TrackedTurns:         make([]TurnMessageEntry, 0),
 		}
 		sm.sessions[userID] = sess
 		go func() { _ = sm.SaveAll() }()
@@ -85,6 +99,12 @@ func (sm *SessionManager) GetSession(userID int64, chatID int64) *UserSession {
 		}
 		if sess.PermissionMode == "" {
 			sess.PermissionMode = sm.defaultPerm
+		}
+		if sess.Language == "" {
+			sess.Language = "id"
+		}
+		if sess.MaxTelegramTurns == 0 {
+			sess.MaxTelegramTurns = 50
 		}
 	}
 
@@ -179,3 +199,81 @@ func (sm *SessionManager) ResetConversation(userID int64) {
 	sm.mu.Unlock()
 	go func() { _ = sm.SaveAll() }()
 }
+
+func (sm *SessionManager) SetLanguage(userID int64, lang string) {
+	sm.mu.Lock()
+	if sess, ok := sm.sessions[userID]; ok {
+		sess.Language = lang
+		sess.LastActiveTime = time.Now()
+	}
+	sm.mu.Unlock()
+	go func() { _ = sm.SaveAll() }()
+}
+
+func (sm *SessionManager) SetMaxTelegramTurns(userID int64, maxTurns int) {
+	sm.mu.Lock()
+	if sess, ok := sm.sessions[userID]; ok {
+		sess.MaxTelegramTurns = maxTurns
+		sess.LastActiveTime = time.Now()
+	}
+	sm.mu.Unlock()
+	go func() { _ = sm.SaveAll() }()
+}
+
+// RecordTurnMessages appends a completed turn (userMsgID + botMsgID).
+// If tracked turns exceed MaxTelegramTurns (when limit > 0), excess turns are evicted
+// and returned so the caller can delete them from Telegram.
+func (sm *SessionManager) RecordTurnMessages(userID int64, userMsgID, botMsgID int) []TurnMessageEntry {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sess, ok := sm.sessions[userID]
+	if !ok {
+		return nil
+	}
+
+	sess.TrackedTurns = append(sess.TrackedTurns, TurnMessageEntry{
+		UserMsgID: userMsgID,
+		BotMsgID:  botMsgID,
+		Timestamp: time.Now(),
+	})
+	sess.LastActiveTime = time.Now()
+
+	limit := sess.MaxTelegramTurns
+	if limit <= 0 {
+		// Limit <= 0 means disabled (e.g. -1 or 0)
+		go func() { _ = sm.SaveAll() }()
+		return nil
+	}
+
+	var toDelete []TurnMessageEntry
+	if len(sess.TrackedTurns) > limit {
+		excess := len(sess.TrackedTurns) - limit
+		toDelete = make([]TurnMessageEntry, excess)
+		copy(toDelete, sess.TrackedTurns[:excess])
+		sess.TrackedTurns = sess.TrackedTurns[excess:]
+	}
+
+	go func() { _ = sm.SaveAll() }()
+	return toDelete
+}
+
+// ClearAllTrackedTurns empties the tracked turns slice and returns all previously tracked turns
+func (sm *SessionManager) ClearAllTrackedTurns(userID int64) []TurnMessageEntry {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	sess, ok := sm.sessions[userID]
+	if !ok {
+		return nil
+	}
+
+	all := make([]TurnMessageEntry, len(sess.TrackedTurns))
+	copy(all, sess.TrackedTurns)
+	sess.TrackedTurns = make([]TurnMessageEntry, 0)
+	sess.LastActiveTime = time.Now()
+
+	go func() { _ = sm.SaveAll() }()
+	return all
+}
+

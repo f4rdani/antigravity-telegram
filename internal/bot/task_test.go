@@ -69,14 +69,19 @@ func TestFormatStatusRunning(t *testing.T) {
 		LastActiveTime:       time.Now(),
 	}
 
-	idleStatus := FormatStatus(sess, false, "")
+	idleStatus := FormatStatus("id", sess, false, "")
 	if !containsString(idleStatus, "🟢 IDLE") {
 		t.Fatalf("Expected idle status to contain '🟢 IDLE', got:\n%s", idleStatus)
 	}
 
-	runningStatus := FormatStatus(sess, true, "Running complex task (15s)")
+	runningStatus := FormatStatus("id", sess, true, "Running complex task (15s)")
 	if !containsString(runningStatus, "SEDANG MEMPROSES TUGAS") || !containsString(runningStatus, "Running complex task") {
 		t.Fatalf("Expected running status to contain running info, got:\n%s", runningStatus)
+	}
+
+	enStatus := FormatStatus("en", sess, true, "Running complex task (15s)")
+	if !containsString(enStatus, "PROCESSING TASK") {
+		t.Fatalf("Expected enStatus to contain 'PROCESSING TASK', got:\n%s", enStatus)
 	}
 }
 

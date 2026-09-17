@@ -208,3 +208,10 @@ func (t *MessageThrottler) Finalize(finalText string, footer string, fallbackAct
 		}
 	}
 }
+
+func (t *MessageThrottler) MessageID() int {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.activeMessage
+}
+

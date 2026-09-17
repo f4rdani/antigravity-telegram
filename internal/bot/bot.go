@@ -63,6 +63,8 @@ func NewBotServer(cfg *config.Config, sm *session.SessionManager) (*BotServer, e
 		{Command: "cancel", Description: "Hentikan proses yang berjalan"},
 		{Command: "file", Description: "Unduh file dari server ke Telegram"},
 		{Command: "artifact", Description: "Buka, unduh, approve/reject artifact & plan"},
+		{Command: "autodelete", Description: "Atur batas auto-delete pesan chat"},
+		{Command: "lang", Description: "Ganti bahasa bot (id / en)"},
 	}
 
 	setCmds := tgbotapi.NewSetMyCommands(commands...)

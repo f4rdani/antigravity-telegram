@@ -12,6 +12,7 @@ import (
 	"agy-tele/config"
 	"agy-tele/internal/artifact"
 	"agy-tele/internal/engine"
+	"agy-tele/internal/i18n"
 	"agy-tele/internal/renderer"
 	"agy-tele/internal/session"
 	"agy-tele/internal/throttler"
@@ -106,6 +107,7 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 	msg := update.Message
 	userID := msg.From.ID
 	chatID := msg.Chat.ID
+	userMsgID := msg.MessageID
 
 	// Security: Whitelist check
 	if !r.cfg.IsUserAllowed(userID) {
@@ -135,9 +137,9 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		if text != "" && strings.HasPrefix(strings.ToLower(text), "/status") {
 			dur := time.Since(task.StartedAt).Round(time.Second)
 			promptDesc := fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
-			reply := tgbotapi.NewMessage(chatID, FormatStatus(sess, true, promptDesc))
+			reply := tgbotapi.NewMessage(chatID, FormatStatus(sess.Language, sess, true, promptDesc))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = QuickActionKeyboard()
+			reply.ReplyMarkup = StatusActionKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 			return
 		}
@@ -156,7 +158,7 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		)
 		reply := tgbotapi.NewMessage(chatID, warningMsg)
 		reply.ParseMode = "HTML"
-		kb := ActiveTaskKeyboard()
+		kb := ActiveTaskKeyboard(sess.Language)
 		reply.ReplyMarkup = &kb
 		_, _ = r.bot.Send(reply)
 		return
@@ -192,7 +194,7 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 				Model:          sess.ActiveModel,
 				Effort:         sess.ActiveEffort,
 				PrintTimeout:   r.cfg.Agy.PrintTimeout,
-			})
+			}, userMsgID)
 			return
 		}
 	}
@@ -217,7 +219,7 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		Model:          sess.ActiveModel,
 		Effort:         sess.ActiveEffort,
 		PrintTimeout:   r.cfg.Agy.PrintTimeout,
-	})
+	}, userMsgID)
 }
 
 func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession, text string) {
@@ -232,25 +234,25 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 
 	switch cmd {
 	case "/start", "/help":
-		reply := tgbotapi.NewMessage(chatID, FormatHelp())
+		reply := tgbotapi.NewMessage(chatID, FormatHelp(sess.Language))
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = QuickActionKeyboard()
+		reply.ReplyMarkup = QuickActionKeyboard(sess.Language)
 		_, _ = r.bot.Send(reply)
 
 	case "/usage", "/quota":
-		r.executeOneShot(chatID, sess.CWD, "📊 Model Quota & Limit", "/usage")
+		r.executeOneShot(chatID, sess.CWD, "📊 Model Quota & Limit", "/usage", sess.Language)
 
 	case "/credits":
-		r.executeOneShot(chatID, sess.CWD, "💰 G1 Credits", "/credits")
+		r.executeOneShot(chatID, sess.CWD, "💰 G1 Credits", "/credits", sess.Language)
 
 	case "/skills":
-		r.executeOneShot(chatID, sess.CWD, "🧰 Available Skills", "/skills")
+		r.executeOneShot(chatID, sess.CWD, "🧰 Available Skills", "/skills", sess.Language)
 
 	case "/agents":
-		r.executeOneShot(chatID, sess.CWD, "🤖 Custom Agents", "/agents")
+		r.executeOneShot(chatID, sess.CWD, "🤖 Custom Agents", "/agents", sess.Language)
 
 	case "/changelog":
-		r.executeOneShot(chatID, sess.CWD, "📝 Changelog", "/changelog")
+		r.executeOneShot(chatID, sess.CWD, "📝 Changelog", "/changelog", sess.Language)
 
 	case "/status":
 		task := r.getActiveTask(userID)
@@ -260,9 +262,9 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			dur := time.Since(task.StartedAt).Round(time.Second)
 			taskDesc = fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
 		}
-		reply := tgbotapi.NewMessage(chatID, FormatStatus(sess, isRunning, taskDesc))
+		reply := tgbotapi.NewMessage(chatID, FormatStatus(sess.Language, sess, isRunning, taskDesc))
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = QuickActionKeyboard()
+		reply.ReplyMarkup = StatusActionKeyboard(sess.Language)
 		_, _ = r.bot.Send(reply)
 
 	case "/model":
@@ -271,13 +273,13 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 				r.sm.SetModel(userID, "")
 				reply := tgbotapi.NewMessage(chatID, "✅ Active model direset ke <b>Default (otomatis agy)</b>.")
 				reply.ParseMode = "HTML"
-				reply.ReplyMarkup = CloseOnlyKeyboard()
+				reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 				_, _ = r.bot.Send(reply)
 			} else {
 				r.sm.SetModel(userID, args)
 				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Active model diatur ke: <code>%s</code>", args))
 				reply.ParseMode = "HTML"
-				reply.ReplyMarkup = CloseOnlyKeyboard()
+				reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 				_, _ = r.bot.Send(reply)
 			}
 		} else {
@@ -287,7 +289,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			}
 			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("🧠 <b>Pilih Model Antigravity</b>\nModel aktif saat ini: <code>%s</code>", active))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = ModelSelectionKeyboard()
+			reply.ReplyMarkup = ModelSelectionKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 		}
 
@@ -298,7 +300,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 				r.sm.SetEffort(userID, effort)
 				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Reasoning effort diatur ke: <b>%s</b>", effort))
 				reply.ParseMode = "HTML"
-				reply.ReplyMarkup = CloseOnlyKeyboard()
+				reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 				_, _ = r.bot.Send(reply)
 			} else {
 				r.sendText(chatID, "Pilihan effort valid: <code>low</code>, <code>medium</code>, atau <code>high</code>.")
@@ -310,7 +312,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			}
 			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("⚡ <b>Set Reasoning Effort</b>\nEffort aktif saat ini: <b>%s</b>", active))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = EffortSelectionKeyboard()
+			reply.ReplyMarkup = EffortSelectionKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 		}
 
@@ -321,7 +323,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 				r.sm.SetPermissionMode(userID, mode)
 				reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("✅ Mode permission diatur ke: <b>%s</b>", mode))
 				reply.ParseMode = "HTML"
-				reply.ReplyMarkup = CloseOnlyKeyboard()
+				reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 				_, _ = r.bot.Send(reply)
 			} else {
 				r.sendText(chatID, "Pilihan valid: <code>/permission auto</code> atau <code>/permission ask</code>")
@@ -329,7 +331,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		} else {
 			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("🔒 <b>Mode Persetujuan Tools</b>\nSaat ini: <b>%s</b>\n\n• <b>Auto-Approve</b>: Aksi & perubahan file disetujui otomatis.\n• <b>Ask User</b>: Konfirmasi manual sebelum eksekusi.", sess.PermissionMode))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = PermissionSelectionKeyboard()
+			reply.ReplyMarkup = PermissionSelectionKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 		}
 
@@ -348,19 +350,19 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			r.sm.UpdateCWD(userID, newPath)
 			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 Workspace CWD berhasil diubah ke:\n<code>%s</code>", newPath))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = CloseOnlyKeyboard()
+			reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 		} else {
 			reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 <b>Direktori Kerja Saat Ini:</b>\n<code>%s</code>\n\nGunakan <code>/cwd &lt;path&gt;</code> untuk berpindah folder.", sess.CWD))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = CloseOnlyKeyboard()
+			reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 		}
 
 	case "/pwd":
 		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📁 <b>Current Working Directory:</b>\n<code>%s</code>", sess.CWD))
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = CloseOnlyKeyboard()
+		reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 		_, _ = r.bot.Send(reply)
 
 	case "/ls":
@@ -372,7 +374,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 				targetPath = filepath.Join(sess.CWD, args)
 			}
 		}
-		r.handleListDir(chatID, targetPath)
+		r.handleListDir(chatID, targetPath, sess.Language)
 
 	case "/new":
 		if args != "" {
@@ -384,7 +386,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 		r.sm.ResetConversation(userID)
 		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nSiap memulai sesi percakapan baru di workspace:\n<code>%s</code>", sess.CWD))
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = CloseOnlyKeyboard()
+		reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 		_, _ = r.bot.Send(reply)
 
 	case "/resume", "/switch":
@@ -434,7 +436,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 				renderer.EscapeHTML(title), wsPath, timeLine,
 			))
 			reply.ParseMode = "HTML"
-			kb := ResumeConfirmedKeyboard(convID)
+			kb := ResumeConfirmedKeyboard(convID, sess.Language)
 			reply.ReplyMarkup = &kb
 			_, _ = r.bot.Send(reply)
 			return
@@ -442,15 +444,15 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 
 		convs := r.sm.GetAvailableConversations(userID)
 		if len(convs) == 0 {
-			reply := tgbotapi.NewMessage(chatID, "📂 <b>Tidak ada riwayat sesi percakapan ditemukan.</b>\nKirim pesan baru untuk memulai percakapan.")
+			reply := tgbotapi.NewMessage(chatID, i18n.T(sess.Language, "no_conversation_history"))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = CloseOnlyKeyboard()
+			reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 			return
 		}
 		reply := tgbotapi.NewMessage(chatID, "📂 <b>Pilih Sesi untuk Di-Resume (/resume):</b>\nSilakan pilih salah satu sesi di bawah:")
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = ResumeKeyboard(convs, sess.ActiveConversationID)
+		reply.ReplyMarkup = ResumeKeyboard(convs, sess.ActiveConversationID, sess.Language)
 		_, _ = r.bot.Send(reply)
 
 	case "/continue":
@@ -464,13 +466,13 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
-		})
+		}, msg.MessageID)
 
 	case "/sessions":
 		convs := r.sm.GetAvailableConversations(userID)
-		reply := tgbotapi.NewMessage(chatID, FormatSessions(convs, sess.ActiveConversationID))
+		reply := tgbotapi.NewMessage(chatID, FormatSessions(sess.Language, convs, sess.ActiveConversationID))
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = ResumeKeyboard(convs, sess.ActiveConversationID)
+		reply.ReplyMarkup = ResumeKeyboard(convs, sess.ActiveConversationID, sess.Language)
 		_, _ = r.bot.Send(reply)
 
 	case "/cancel", "/stop":
@@ -483,15 +485,15 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 	case "/artifact", "/artifacts":
 		items, err := artifact.ListArtifacts(sess.ActiveConversationID)
 		if err != nil || len(items) == 0 {
-			reply := tgbotapi.NewMessage(chatID, "📑 <b>Tidak ada artifact ditemukan.</b>\nArtifact dibuat otomatis saat menjalankan perencana (misal <code>/plan &lt;tugas&gt;</code>) atau saat Antigravity menghasilkan dokumen/rancangan arsitektur.")
+			reply := tgbotapi.NewMessage(chatID, i18n.T(sess.Language, "no_artifacts_found"))
 			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = CloseOnlyKeyboard()
+			reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
 			_, _ = r.bot.Send(reply)
 			return
 		}
-		reply := tgbotapi.NewMessage(chatID, FormatArtifacts(items))
+		reply := tgbotapi.NewMessage(chatID, FormatArtifacts(sess.Language, items))
 		reply.ParseMode = "HTML"
-		reply.ReplyMarkup = ArtifactListKeyboard(items)
+		reply.ReplyMarkup = ArtifactListKeyboard(items, sess.Language)
 		_, _ = r.bot.Send(reply)
 
 	case "/file":
@@ -520,7 +522,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
-		})
+		}, msg.MessageID)
 
 	case "/goal":
 		if args == "" {
@@ -537,7 +539,74 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
 			IsGoal:         true,
-		})
+		}, msg.MessageID)
+
+	case "/autodelete":
+		if args != "" {
+			argLower := strings.ToLower(args)
+			if argLower == "off" || argLower == "disable" || argLower == "disabled" || argLower == "0" {
+				r.sm.SetMaxTelegramTurns(userID, -1)
+				reply := tgbotapi.NewMessage(chatID, i18n.T(sess.Language, "autodelete_disabled"))
+				reply.ParseMode = "HTML"
+				reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
+				_, _ = r.bot.Send(reply)
+			} else if argLower == "clean" || argLower == "clear" {
+				cleared := r.sm.ClearAllTrackedTurns(userID)
+				if len(cleared) > 0 {
+					go r.deleteTurnMessagesAsync(chatID, cleared)
+					reply := tgbotapi.NewMessage(chatID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_cleared"), len(cleared)*2))
+					reply.ParseMode = "HTML"
+					reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
+					_, _ = r.bot.Send(reply)
+				} else {
+					reply := tgbotapi.NewMessage(chatID, i18n.T(sess.Language, "autodelete_already_empty"))
+					reply.ParseMode = "HTML"
+					reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
+					_, _ = r.bot.Send(reply)
+				}
+			} else {
+				var limit int
+				if _, err := fmt.Sscanf(args, "%d", &limit); err == nil && limit > 0 {
+					r.sm.SetMaxTelegramTurns(userID, limit)
+					reply := tgbotapi.NewMessage(chatID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_set"), limit))
+					reply.ParseMode = "HTML"
+					reply.ReplyMarkup = CloseOnlyKeyboard(sess.Language)
+					_, _ = r.bot.Send(reply)
+				} else {
+					r.sendText(chatID, "Format: <code>/autodelete [20|50|100|off|clean]</code>")
+				}
+			}
+		} else {
+			reply := tgbotapi.NewMessage(chatID, i18n.GetAutoDeleteText(sess.Language, sess.MaxTelegramTurns, len(sess.TrackedTurns)))
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = AutoDeleteKeyboard(sess.Language, sess.MaxTelegramTurns)
+			_, _ = r.bot.Send(reply)
+		}
+
+	case "/lang", "/language":
+		if args != "" {
+			target := strings.ToLower(args)
+			if target == "en" || target == "english" {
+				r.sm.SetLanguage(userID, "en")
+				reply := tgbotapi.NewMessage(chatID, i18n.T("en", "lang_changed"))
+				reply.ParseMode = "HTML"
+				reply.ReplyMarkup = CloseOnlyKeyboard("en")
+				_, _ = r.bot.Send(reply)
+			} else if target == "id" || target == "indonesia" || target == "indonesian" {
+				r.sm.SetLanguage(userID, "id")
+				reply := tgbotapi.NewMessage(chatID, i18n.T("id", "lang_changed"))
+				reply.ParseMode = "HTML"
+				reply.ReplyMarkup = CloseOnlyKeyboard("id")
+				_, _ = r.bot.Send(reply)
+			} else {
+				r.sendText(chatID, "Format: <code>/lang id</code> (Bahasa Indonesia) atau <code>/lang en</code> (English)")
+			}
+		} else {
+			reply := tgbotapi.NewMessage(chatID, i18n.GetLanguageMenuText(sess.Language))
+			reply.ParseMode = "HTML"
+			reply.ReplyMarkup = LanguageSelectionKeyboard(sess.Language)
+			_, _ = r.bot.Send(reply)
+		}
 
 	default:
 		// Forward any other custom slash command or skill to the agent
@@ -550,7 +619,7 @@ func (r *Router) handleCommand(msg *tgbotapi.Message, sess *session.UserSession,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
 			PrintTimeout:   r.cfg.Agy.PrintTimeout,
-		})
+		}, msg.MessageID)
 	}
 }
 
@@ -579,36 +648,36 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		if r.cancelActiveTask(userID, chatID) {
 			edit := tgbotapi.NewEditMessageText(chatID, msgID, "🛑 <b>Tugas aktif berhasil dihentikan.</b> Anda dapat mengirim instruksi baru sekarang.")
 			edit.ParseMode = "HTML"
-			kb := CloseOnlyKeyboard()
+			kb := CloseOnlyKeyboard(sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		} else {
 			edit := tgbotapi.NewEditMessageText(chatID, msgID, "ℹ️ Tidak ada proses aktif yang sedang berjalan.")
 			edit.ParseMode = "HTML"
-			kb := CloseOnlyKeyboard()
+			kb := CloseOnlyKeyboard(sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		}
 
 	case data == "cmd_help_menu":
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatHelp())
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatHelp(sess.Language))
 		edit.ParseMode = "HTML"
-		kb := QuickActionKeyboard()
+		kb := QuickActionKeyboard(sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_resume_menu":
 		convs := r.sm.GetAvailableConversations(userID)
 		if len(convs) == 0 {
-			edit := tgbotapi.NewEditMessageText(chatID, msgID, "📂 <b>Tidak ada riwayat sesi percakapan ditemukan.</b>")
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.T(sess.Language, "no_conversation_history"))
 			edit.ParseMode = "HTML"
-			kb := CloseOnlyKeyboard()
+			kb := CloseOnlyKeyboard(sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		} else {
 			edit := tgbotapi.NewEditMessageText(chatID, msgID, "📂 <b>Pilih Sesi untuk Di-Resume (/resume):</b>\nSilakan pilih sesi di bawah untuk melanjutkan percakapan:")
 			edit.ParseMode = "HTML"
-			kb := ResumeKeyboard(convs, sess.ActiveConversationID)
+			kb := ResumeKeyboard(convs, sess.ActiveConversationID, sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		}
@@ -616,15 +685,15 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 	case data == "cmd_artifact_menu":
 		items, err := artifact.ListArtifacts(sess.ActiveConversationID)
 		if err != nil || len(items) == 0 {
-			edit := tgbotapi.NewEditMessageText(chatID, msgID, "📑 <b>Tidak ada artifact ditemukan.</b>\nArtifact dibuat otomatis saat menjalankan perencana (misal <code>/plan &lt;tugas&gt;</code>) atau saat Antigravity menghasilkan dokumen terstruktur.")
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.T(sess.Language, "no_artifacts_found"))
 			edit.ParseMode = "HTML"
-			kb := CloseOnlyKeyboard()
+			kb := CloseOnlyKeyboard(sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		} else {
-			edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatArtifacts(items))
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatArtifacts(sess.Language, items))
 			edit.ParseMode = "HTML"
-			kb := ArtifactListKeyboard(items)
+			kb := ArtifactListKeyboard(items, sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		}
@@ -643,9 +712,9 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 			r.sendText(chatID, "❌ Artifact tidak ditemukan.")
 			return
 		}
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatArtifactDetail(*found))
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatArtifactDetail(sess.Language, *found))
 		edit.ParseMode = "HTML"
-		kb := ArtifactDetailKeyboard(*found)
+		kb := ArtifactDetailKeyboard(*found, sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
@@ -674,7 +743,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		}
 		reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("📖 <b>Isi Dokumen: %s</b>\n\n%s", renderer.EscapeHTML(found.FileName), renderer.FormatMarkdownForTelegram(strContent)))
 		reply.ParseMode = "HTML"
-		kb := ArtifactDetailKeyboard(*found)
+		kb := ArtifactDetailKeyboard(*found, sess.Language)
 		reply.ReplyMarkup = &kb
 		_, _ = r.bot.Send(reply)
 
@@ -708,7 +777,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 			PermissionMode: sess.PermissionMode,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
-		})
+		}, 0)
 
 	case strings.HasPrefix(data, "art_reject:"):
 		artID := strings.TrimPrefix(data, "art_reject:")
@@ -722,7 +791,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 			PermissionMode: sess.PermissionMode,
 			Model:          sess.ActiveModel,
 			Effort:         sess.ActiveEffort,
-		})
+		}, 0)
 
 	case strings.HasPrefix(data, "resume_id:"):
 		convID := strings.TrimPrefix(data, "resume_id:")
@@ -763,18 +832,18 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 			renderer.EscapeHTML(title), wsPath, timeLine,
 		))
 		edit.ParseMode = "HTML"
-		kb := ResumeConfirmedKeyboard(convID)
+		kb := ResumeConfirmedKeyboard(convID, sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_usage":
-		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "📊 Model Quota & Limit", "/usage", "cmd_usage")
+		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "📊 Model Quota & Limit", "/usage", "cmd_usage", sess.Language)
 
 	case data == "cmd_credits":
-		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "💰 G1 Credits", "/credits", "cmd_credits")
+		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "💰 G1 Credits", "/credits", "cmd_credits", sess.Language)
 
 	case data == "cmd_skills":
-		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "🧰 Available Skills", "/skills", "cmd_skills")
+		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "🧰 Available Skills", "/skills", "cmd_skills", sess.Language)
 
 	case data == "cmd_status":
 		task := r.getActiveTask(userID)
@@ -784,9 +853,79 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 			dur := time.Since(task.StartedAt).Round(time.Second)
 			taskDesc = fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
 		}
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatStatus(sess, isRunning, taskDesc))
+		toast := tgbotapi.NewCallback(cb.ID, i18n.T(sess.Language, "status_refreshed"))
+		_, _ = r.bot.Request(toast)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatStatus(sess.Language, sess, isRunning, taskDesc))
 		edit.ParseMode = "HTML"
-		kb := QuickActionKeyboard()
+		kb := StatusActionKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case data == "cmd_ls_cwd":
+		toast := tgbotapi.NewCallback(cb.ID, "📁 "+sess.CWD)
+		_, _ = r.bot.Request(toast)
+		r.handleListDir(chatID, sess.CWD, sess.Language)
+
+	case data == "cmd_autodelete_menu":
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.GetAutoDeleteText(sess.Language, sess.MaxTelegramTurns, len(sess.TrackedTurns)))
+		edit.ParseMode = "HTML"
+		kb := AutoDeleteKeyboard(sess.Language, sess.MaxTelegramTurns)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case strings.HasPrefix(data, "set_autodelete:"):
+		valStr := strings.TrimPrefix(data, "set_autodelete:")
+		var limit int
+		_, _ = fmt.Sscanf(valStr, "%d", &limit)
+		if limit <= 0 {
+			r.sm.SetMaxTelegramTurns(userID, -1)
+			toast := tgbotapi.NewCallback(cb.ID, i18n.T(sess.Language, "autodelete_disabled"))
+			_, _ = r.bot.Request(toast)
+		} else {
+			r.sm.SetMaxTelegramTurns(userID, limit)
+			toast := tgbotapi.NewCallback(cb.ID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_set"), limit))
+			_, _ = r.bot.Request(toast)
+		}
+		sess = r.sm.GetSession(userID, chatID)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.GetAutoDeleteText(sess.Language, sess.MaxTelegramTurns, len(sess.TrackedTurns)))
+		edit.ParseMode = "HTML"
+		kb := AutoDeleteKeyboard(sess.Language, sess.MaxTelegramTurns)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case data == "cmd_clean_chat_now":
+		cleared := r.sm.ClearAllTrackedTurns(userID)
+		if len(cleared) > 0 {
+			go r.deleteTurnMessagesAsync(chatID, cleared)
+			toast := tgbotapi.NewCallback(cb.ID, fmt.Sprintf(i18n.T(sess.Language, "autodelete_cleared"), len(cleared)*2))
+			_, _ = r.bot.Request(toast)
+		} else {
+			toast := tgbotapi.NewCallback(cb.ID, i18n.T(sess.Language, "autodelete_already_empty"))
+			_, _ = r.bot.Request(toast)
+		}
+		sess = r.sm.GetSession(userID, chatID)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.GetAutoDeleteText(sess.Language, sess.MaxTelegramTurns, len(sess.TrackedTurns)))
+		edit.ParseMode = "HTML"
+		kb := AutoDeleteKeyboard(sess.Language, sess.MaxTelegramTurns)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case data == "cmd_lang_menu":
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.GetLanguageMenuText(sess.Language))
+		edit.ParseMode = "HTML"
+		kb := LanguageSelectionKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case strings.HasPrefix(data, "set_lang:"):
+		newLang := strings.TrimPrefix(data, "set_lang:")
+		r.sm.SetLanguage(userID, newLang)
+		sess = r.sm.GetSession(userID, chatID)
+		toast := tgbotapi.NewCallback(cb.ID, i18n.T(sess.Language, "lang_changed"))
+		_, _ = r.bot.Request(toast)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.GetLanguageMenuText(sess.Language))
+		edit.ParseMode = "HTML"
+		kb := LanguageSelectionKeyboard(sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
@@ -794,7 +933,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		r.sm.ResetConversation(userID)
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("🔄 <b>Sesi Percakapan Direset</b>\nWorkspace aktif: <code>%s</code>", sess.CWD))
 		edit.ParseMode = "HTML"
-		kb := BackAndCloseKeyboard("cmd_help_menu")
+		kb := BackAndCloseKeyboard("cmd_help_menu", sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
@@ -805,7 +944,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		}
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("🧠 <b>Pilih Model Antigravity:</b>\nModel aktif saat ini: <code>%s</code>", active))
 		edit.ParseMode = "HTML"
-		kb := ModelSelectionKeyboard()
+		kb := ModelSelectionKeyboard(sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
@@ -815,14 +954,14 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 			r.sm.SetModel(userID, "")
 			edit := tgbotapi.NewEditMessageText(chatID, msgID, "✅ <b>Active model direset ke Default (otomatis agy).</b>")
 			edit.ParseMode = "HTML"
-			kb := BackAndCloseKeyboard("cmd_model_menu")
+			kb := BackAndCloseKeyboard("cmd_model_menu", sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		} else {
 			r.sm.SetModel(userID, modelName)
 			edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Active model diatur ke:</b>\n<code>%s</code>", modelName))
 			edit.ParseMode = "HTML"
-			kb := BackAndCloseKeyboard("cmd_model_menu")
+			kb := BackAndCloseKeyboard("cmd_model_menu", sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
 		}
@@ -834,7 +973,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		}
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("⚡ <b>Pilih Reasoning Effort:</b>\nEffort aktif saat ini: <b>%s</b>", active))
 		edit.ParseMode = "HTML"
-		kb := EffortSelectionKeyboard()
+		kb := EffortSelectionKeyboard(sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
@@ -843,14 +982,14 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		r.sm.SetEffort(userID, effort)
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Reasoning effort diatur ke:</b>\n<b>%s</b>", effort))
 		edit.ParseMode = "HTML"
-		kb := BackAndCloseKeyboard("cmd_effort_menu")
+		kb := BackAndCloseKeyboard("cmd_effort_menu", sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_perm_menu":
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("🔒 <b>Pilih Mode Persetujuan Tools:</b>\nSaat ini: <b>%s</b>\n\n• <b>Auto-Approve</b>: Aksi disetujui otomatis tanpa menunggu.\n• <b>Ask User</b>: Konfirmasi manual tiap aksi.", sess.PermissionMode))
 		edit.ParseMode = "HTML"
-		kb := PermissionSelectionKeyboard()
+		kb := PermissionSelectionKeyboard(sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 
@@ -859,13 +998,27 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		r.sm.SetPermissionMode(userID, mode)
 		edit := tgbotapi.NewEditMessageText(chatID, msgID, fmt.Sprintf("✅ <b>Mode permission diatur ke:</b>\n<b>%s</b>", mode))
 		edit.ParseMode = "HTML"
-		kb := BackAndCloseKeyboard("cmd_perm_menu")
+		kb := BackAndCloseKeyboard("cmd_perm_menu", sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 	}
 }
 
-func (r *Router) executeOneShot(chatID int64, cwd string, title string, command string) {
+func (r *Router) deleteTurnMessagesAsync(chatID int64, entries []session.TurnMessageEntry) {
+	for _, e := range entries {
+		if e.BotMsgID > 0 {
+			delBot := tgbotapi.NewDeleteMessage(chatID, e.BotMsgID)
+			_, _ = r.bot.Request(delBot)
+		}
+		if e.UserMsgID > 0 {
+			delUser := tgbotapi.NewDeleteMessage(chatID, e.UserMsgID)
+			_, _ = r.bot.Request(delUser)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func (r *Router) executeOneShot(chatID int64, cwd string, title string, command string, lang string) {
 	ctx := context.Background()
 
 	// Show typing status while command is running
@@ -891,7 +1044,7 @@ func (r *Router) executeOneShot(chatID int64, cwd string, title string, command 
 	}
 
 	out, err := r.oneShot.Run(ctx, cwd, command)
-	kb := CloseOnlyKeyboard()
+	kb := CloseOnlyKeyboard(lang)
 	if err != nil {
 		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, fmt.Sprintf("❌ Error menjalankan <code>%s</code>:\n<pre>%s</pre>", command, renderer.EscapeHTML(err.Error())))
 		edit.ParseMode = "HTML"
@@ -910,7 +1063,7 @@ func (r *Router) executeOneShot(chatID int64, cwd string, title string, command 
 	_, _ = r.bot.Send(edit)
 }
 
-func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, title string, command string, refreshCmd string) {
+func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, title string, command string, refreshCmd string, lang string) {
 	ctx := context.Background()
 
 	// Show typing status while command is running
@@ -935,7 +1088,7 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 	_, _ = r.bot.Send(loadingEdit)
 
 	out, err := r.oneShot.Run(ctx, cwd, command)
-	kb := RefreshAndBackKeyboard(refreshCmd, "cmd_help_menu")
+	kb := RefreshAndBackKeyboard(refreshCmd, "cmd_help_menu", lang)
 	if err != nil {
 		edit := tgbotapi.NewEditMessageText(chatID, messageID, fmt.Sprintf("❌ Error menjalankan <code>%s</code>:\n<pre>%s</pre>", command, renderer.EscapeHTML(err.Error())))
 		edit.ParseMode = "HTML"
@@ -954,7 +1107,7 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 	_, _ = r.bot.Send(edit)
 }
 
-func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions) {
+func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, userMsgID int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -996,7 +1149,12 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			break
 		}
 
-		result, err := r.runSingleStreamTurn(ctx, chatID, sess, opts, iteration)
+		turnUserMsgID := 0
+		if iteration == 1 {
+			turnUserMsgID = userMsgID
+		}
+
+		result, err := r.runSingleStreamTurn(ctx, chatID, sess, opts, iteration, turnUserMsgID)
 		if ctx.Err() != nil {
 			break
 		}
@@ -1033,15 +1191,30 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 	}
 }
 
-func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, iteration int) (*engine.ResultPayload, error) {
+func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, iteration int, userMsgID int) (*engine.ResultPayload, error) {
 	initialText := "💭 <i>Menganalisis instruksi...</i>"
+	if sess.Language == "en" {
+		initialText = "💭 <i>Analyzing instructions...</i>"
+	}
 	if opts.Mode == "plan" {
-		initialText = "📋 <i>Menyiapkan rencana (/plan)...</i>"
+		if sess.Language == "en" {
+			initialText = "📋 <i>Preparing plan (/plan)...</i>"
+		} else {
+			initialText = "📋 <i>Menyiapkan rencana (/plan)...</i>"
+		}
 	} else if opts.IsGoal {
 		if iteration > 1 {
-			initialText = fmt.Sprintf("🎯 <i>Melanjutkan eksekusi sasaran (/goal) turn %d...</i>", iteration)
+			if sess.Language == "en" {
+				initialText = fmt.Sprintf("🎯 <i>Continuing goal (/goal) turn %d...</i>", iteration)
+			} else {
+				initialText = fmt.Sprintf("🎯 <i>Melanjutkan eksekusi sasaran (/goal) turn %d...</i>", iteration)
+			}
 		} else {
-			initialText = "🎯 <i>Memulai pengerjaan sasaran (/goal)...</i>"
+			if sess.Language == "en" {
+				initialText = "🎯 <i>Starting autonomous goal (/goal)...</i>"
+			} else {
+				initialText = "🎯 <i>Memulai pengerjaan sasaran (/goal)...</i>"
+			}
 		}
 	}
 
@@ -1065,7 +1238,7 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 			if step == nil {
 				return
 			}
-			badge := FormatActivityBadge(step)
+			badge := FormatActivityBadge(sess.Language, step)
 
 			mu.Lock()
 			if step.State == "DONE" && step.StepType == "tool" {
@@ -1147,17 +1320,23 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 		}
 
 		if result.Error != "" {
+			errPrefix := i18n.T(sess.Language, "err_occurred")
 			if strings.TrimSpace(finalText) == "" {
-				finalText = fmt.Sprintf("❌ <b>Terjadi kesalahan:</b>\n%s", renderer.EscapeHTML(result.Error))
+				finalText = fmt.Sprintf("❌ <b>%s</b>\n%s", errPrefix, renderer.EscapeHTML(result.Error))
 			} else {
 				finalText = fmt.Sprintf("%s\n\n⚠️ <i>Peringatan / Error: %s</i>", finalText, renderer.EscapeHTML(result.Error))
 			}
 		}
 	} else if err != nil {
 		if ctx.Err() != nil {
-			finalText = "🛑 <b>Tugas dihentikan oleh pengguna.</b>"
+			if sess.Language == "en" {
+				finalText = "🛑 <b>Task stopped by user.</b>"
+			} else {
+				finalText = "🛑 <b>Tugas dihentikan oleh pengguna.</b>"
+			}
 		} else {
-			finalText = fmt.Sprintf("❌ <b>Terjadi kesalahan:</b>\n%s", renderer.EscapeHTML(err.Error()))
+			errPrefix := i18n.T(sess.Language, "err_occurred")
+			finalText = fmt.Sprintf("❌ <b>%s</b>\n%s", errPrefix, renderer.EscapeHTML(err.Error()))
 		}
 	}
 
@@ -1168,21 +1347,31 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 	copy(actions, recentActions)
 	mu.Unlock()
 
+	var finalBotMsgID int
 	if started && savedBuffer != nil {
 		activityTracker.Delete()
 		savedBuffer.Finalize(finalText, footer, actions)
+		finalBotMsgID = savedBuffer.MessageID()
 	} else {
 		text := finalText
 		if text == "" {
 			if len(actions) > 0 {
 				var sb strings.Builder
-				sb.WriteString("✅ <b>Tugas selesai dieksekusi.</b>\n\n<i>Ringkasan:</i>\n")
+				if sess.Language == "en" {
+					sb.WriteString("✅ <b>Task execution completed.</b>\n\n<i>Activity summary:</i>\n")
+				} else {
+					sb.WriteString("✅ <b>Tugas selesai dieksekusi.</b>\n\n<i>Ringkasan:</i>\n")
+				}
 				for _, a := range actions {
 					sb.WriteString(fmt.Sprintf("• %s\n", a))
 				}
 				text = sb.String()
 			} else {
-				text = "✅ <b>Tugas selesai.</b>"
+				if sess.Language == "en" {
+					text = "✅ <b>Task completed.</b>"
+				} else {
+					text = "✅ <b>Tugas selesai.</b>"
+				}
 			}
 		}
 		formatted := renderer.FormatMarkdownForTelegram(text)
@@ -1198,10 +1387,12 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 			edit.ParseMode = "HTML"
 			if _, sendErr := r.bot.Send(edit); sendErr == nil {
 				edited = true
+				finalBotMsgID = trackerMsgID
 			} else {
 				editPlain := tgbotapi.NewEditMessageText(chatID, trackerMsgID, renderer.StripHTML(formatted))
 				if _, sendPlain := r.bot.Send(editPlain); sendPlain == nil {
 					edited = true
+					finalBotMsgID = trackerMsgID
 				}
 			}
 		}
@@ -1210,19 +1401,30 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 			activityTracker.Delete()
 			msg := tgbotapi.NewMessage(chatID, formatted)
 			msg.ParseMode = "HTML"
-			_, sendErr := r.bot.Send(msg)
-			if sendErr != nil {
+			if sentMsg, sendErr := r.bot.Send(msg); sendErr == nil {
+				finalBotMsgID = sentMsg.MessageID
+			} else {
 				plain := renderer.StripHTML(formatted)
 				msgPlain := tgbotapi.NewMessage(chatID, plain)
-				_, _ = r.bot.Send(msgPlain)
+				if sentPlain, errPlain := r.bot.Send(msgPlain); errPlain == nil {
+					finalBotMsgID = sentPlain.MessageID
+				}
 			}
+		}
+	}
+
+	// Auto-delete turn tracking: record turn and evict expired messages in Telegram
+	if finalBotMsgID > 0 {
+		toDelete := r.sm.RecordTurnMessages(opts.UserID, userMsgID, finalBotMsgID)
+		if len(toDelete) > 0 {
+			go r.deleteTurnMessagesAsync(chatID, toDelete)
 		}
 	}
 
 	return result, err
 }
 
-func (r *Router) handleListDir(chatID int64, targetPath string) {
+func (r *Router) handleListDir(chatID int64, targetPath string, lang string) {
 	entries, err := os.ReadDir(targetPath)
 	if err != nil {
 		r.sendText(chatID, fmt.Sprintf("❌ Gagal membaca direktori: <code>%s</code> (%v)", targetPath, err))
@@ -1230,12 +1432,20 @@ func (r *Router) handleListDir(chatID int64, targetPath string) {
 	}
 
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("📂 <b>Isi Direktori:</b> <code>%s</code>\n\n", targetPath))
+	if lang == "en" {
+		sb.WriteString(fmt.Sprintf("📂 <b>Directory Contents:</b> <code>%s</code>\n\n", targetPath))
+	} else {
+		sb.WriteString(fmt.Sprintf("📂 <b>Isi Direktori:</b> <code>%s</code>\n\n", targetPath))
+	}
 
 	count := 0
 	for _, e := range entries {
 		if count >= 40 {
-			sb.WriteString(fmt.Sprintf("<i>... dan %d file/folder lainnya</i>\n", len(entries)-count))
+			if lang == "en" {
+				sb.WriteString(fmt.Sprintf("<i>... and %d other files/folders</i>\n", len(entries)-count))
+			} else {
+				sb.WriteString(fmt.Sprintf("<i>... dan %d file/folder lainnya</i>\n", len(entries)-count))
+			}
 			break
 		}
 
@@ -1248,12 +1458,16 @@ func (r *Router) handleListDir(chatID int64, targetPath string) {
 	}
 
 	if len(entries) == 0 {
-		sb.WriteString("<i>(Direktori kosong)</i>\n")
+		if lang == "en" {
+			sb.WriteString("<i>(Directory is empty)</i>\n")
+		} else {
+			sb.WriteString("<i>(Direktori kosong)</i>\n")
+		}
 	}
 
 	reply := tgbotapi.NewMessage(chatID, sb.String())
 	reply.ParseMode = "HTML"
-	reply.ReplyMarkup = CloseOnlyKeyboard()
+	reply.ReplyMarkup = CloseOnlyKeyboard(lang)
 	_, _ = r.bot.Send(reply)
 }
 
@@ -1285,3 +1499,4 @@ func (r *Router) sendText(chatID int64, text string) {
 	msg.ParseMode = "HTML"
 	_, _ = r.bot.Send(msg)
 }
+
