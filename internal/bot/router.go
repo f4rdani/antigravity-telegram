@@ -1632,15 +1632,6 @@ func (r *Router) handleUsage(chatID int64, sess *session.UserSession) {
 	}()
 	defer close(stopTyping)
 
-	loadingText := "⏳ Menjalankan <code>/usage</code>..."
-	if lang == "en" {
-		loadingText = "⏳ Executing <code>/usage</code>..."
-	}
-	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, loadingText))
-	if err != nil {
-		return
-	}
-
 	var (
 		out       string
 		perr      *i18n.ParsedError
@@ -1668,18 +1659,18 @@ func (r *Router) handleUsage(chatID int64, sess *session.UserSession) {
 
 	if perr != nil {
 		errKb := ErrorActionKeyboard(perr.ExtractedURLs, perr.IsEligibility, perr.IsQuotaLimit, lang)
-		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatErrorCard(lang, perr))
-		edit.ParseMode = "HTML"
-		edit.ReplyMarkup = &errKb
-		_, _ = r.bot.Send(edit)
+		msg := tgbotapi.NewMessage(chatID, i18n.FormatErrorCard(lang, perr))
+		msg.ParseMode = "HTML"
+		msg.ReplyMarkup = &errKb
+		_, _ = r.bot.Send(msg)
 		return
 	}
 
 	kb := RefreshAndBackKeyboard("cmd_usage", "cmd_help_menu", lang)
-	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, r.renderUsageBody(lang, out, activeAcc))
-	edit.ParseMode = "HTML"
-	edit.ReplyMarkup = &kb
-	_, _ = r.bot.Send(edit)
+	msg := tgbotapi.NewMessage(chatID, r.renderUsageBody(lang, out, activeAcc))
+	msg.ParseMode = "HTML"
+	msg.ReplyMarkup = &kb
+	_, _ = r.bot.Send(msg)
 }
 
 // handleUsageInPlace renders the beautified /usage quota card into an existing
@@ -1701,14 +1692,6 @@ func (r *Router) handleUsageInPlace(chatID int64, messageID int, sess *session.U
 		}
 	}()
 	defer close(stopTyping)
-
-	loadingText := "⏳ Menjalankan <code>/usage</code>..."
-	if lang == "en" {
-		loadingText = "⏳ Executing <code>/usage</code>..."
-	}
-	loadingEdit := tgbotapi.NewEditMessageText(chatID, messageID, loadingText)
-	loadingEdit.ParseMode = "HTML"
-	_, _ = r.bot.Send(loadingEdit)
 
 	var (
 		out       string

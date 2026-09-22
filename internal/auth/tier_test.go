@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -74,5 +75,30 @@ func TestTierCacheAndInvalidation(t *testing.T) {
 	tierCacheMu.RUnlock()
 	if exists {
 		t.Error("expected cache to be invalidated")
+	}
+}
+
+func TestCodeAssistPaidTierPriority(t *testing.T) {
+	// Simulate user with free currentTier but paidTier g1-pro-tier (Google One AI Pro subscription)
+	rawJSON := `{
+		"currentTier": {"id": "free-tier", "name": "Antigravity"},
+		"paidTier": {"id": "g1-pro-tier", "name": "Google AI Pro"}
+	}`
+
+	var resp codeAssistTierResp
+	importJSON := []byte(rawJSON)
+	if err := json.Unmarshal(importJSON, &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	var tier string
+	if resp.PaidTier != nil && resp.PaidTier.ID != "" {
+		tier = NormalizeTierName(resp.PaidTier.ID, resp.PaidTier.Name)
+	} else if resp.CurrentTier != nil && resp.CurrentTier.ID != "" {
+		tier = NormalizeTierName(resp.CurrentTier.ID, resp.CurrentTier.Name)
+	}
+
+	if tier != "Pro" {
+		t.Errorf("expected Pro, got %s", tier)
 	}
 }

@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.19] - 2026-09-22
+
+### Fixed & Improved
+- **Fix Google One AI Pro/Ultra Subscription Detection (`paidTier`)**:
+  - Correctly prioritizes `paidTier` from Google Cloud Code Assist API, properly recognizing Google AI Pro (`g1-pro-tier`) and Google AI Ultra (`g1-ultra-tier`) users rather than erroneously falling back to `currentTier` (`free-tier`).
+- **Eliminate Clunky Loading Placeholder (`⏳ Menjalankan /usage...`)**:
+  - Replaced the placeholder message with Telegram's native typing indicator (`ChatTyping`).
+  - The final quota card is sent directly without intermediate messages, unescaped HTML tags, or "edited" message tags.
+  - In-place inline refresh now seamlessly updates timestamps and quota progress bars without flickering.
+
 ## [1.0.18] - 2026-09-22
 
 ### Added & Improved

@@ -131,8 +131,14 @@ func FetchTier(ctx context.Context, accessToken string) (string, error) {
 			var caResp codeAssistTierResp
 			err := json.NewDecoder(resp.Body).Decode(&caResp)
 			_ = resp.Body.Close()
-			if err == nil && caResp.CurrentTier != nil {
-				return NormalizeTierName(caResp.CurrentTier.ID, caResp.CurrentTier.Name), nil
+			if err == nil {
+				// Google One AI subscriptions (Pro, Ultra, Plus) are returned in paidTier
+				if caResp.PaidTier != nil && caResp.PaidTier.ID != "" {
+					return NormalizeTierName(caResp.PaidTier.ID, caResp.PaidTier.Name), nil
+				}
+				if caResp.CurrentTier != nil && caResp.CurrentTier.ID != "" {
+					return NormalizeTierName(caResp.CurrentTier.ID, caResp.CurrentTier.Name), nil
+				}
 			}
 			return "Free", nil
 		}
