@@ -1580,9 +1580,13 @@ func (r *Router) fetchUsage(cwd string) (string, *i18n.ParsedError) {
 	return out, nil
 }
 
-func (r *Router) renderUsageBody(lang, out string) string {
+func (r *Router) renderUsageBody(lang, out string, acc ...*auth.AccountInfo) string {
+	var a *auth.AccountInfo
+	if len(acc) > 0 {
+		a = acc[0]
+	}
 	if entries, ok := ParseUsageOutput(out); ok {
-		return FormatUsageCard(lang, entries, time.Now())
+		return FormatUsageCard(lang, entries, time.Now(), a)
 	}
 	// Fallback: raw output in a code block when the shape is unexpected.
 	if strings.TrimSpace(out) == "" {
@@ -1591,7 +1595,22 @@ func (r *Router) renderUsageBody(lang, out string) string {
 		}
 		return "(Output kosong)"
 	}
-	return FormatCodeBlock("📊 Model Quota & Limit", out)
+	var sb strings.Builder
+	if a != nil && a.Email != "" {
+		tier := a.Tier
+		if tier == "" {
+			tier = "Free"
+		}
+		if lang == "en" {
+			sb.WriteString(fmt.Sprintf("👤 <b>Account:</b> <code>%s</code>\n", renderer.EscapeHTML(a.Email)))
+			sb.WriteString(fmt.Sprintf("%s <b>Plan:</b> %s\n\n", auth.TierIcon(tier), renderer.EscapeHTML(tier)))
+		} else {
+			sb.WriteString(fmt.Sprintf("👤 <b>Akun:</b> <code>%s</code>\n", renderer.EscapeHTML(a.Email)))
+			sb.WriteString(fmt.Sprintf("%s <b>Langganan:</b> %s\n\n", auth.TierIcon(tier), renderer.EscapeHTML(tier)))
+		}
+	}
+	sb.WriteString(FormatCodeBlock("📊 Model Quota & Limit", out))
+	return sb.String()
 }
 
 // handleUsage renders the beautified /usage quota card (slash-command path).
@@ -1622,7 +1641,31 @@ func (r *Router) handleUsage(chatID int64, sess *session.UserSession) {
 		return
 	}
 
-	out, perr := r.fetchUsage(sess.CWD)
+	var (
+		out       string
+		perr      *i18n.ParsedError
+		activeAcc *auth.AccountInfo
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		out, perr = r.fetchUsage(sess.CWD)
+	}()
+
+	go func() {
+		defer wg.Done()
+		acc, err := auth.GetActiveAccount()
+		if err == nil && acc != nil && acc.Email != "" {
+			acc.Tier = auth.GetActiveTier(acc.Email)
+			activeAcc = acc
+		}
+	}()
+
+	wg.Wait()
+
 	if perr != nil {
 		errKb := ErrorActionKeyboard(perr.ExtractedURLs, perr.IsEligibility, perr.IsQuotaLimit, lang)
 		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatErrorCard(lang, perr))
@@ -1633,7 +1676,7 @@ func (r *Router) handleUsage(chatID int64, sess *session.UserSession) {
 	}
 
 	kb := RefreshAndBackKeyboard("cmd_usage", "cmd_help_menu", lang)
-	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, r.renderUsageBody(lang, out))
+	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, r.renderUsageBody(lang, out, activeAcc))
 	edit.ParseMode = "HTML"
 	edit.ReplyMarkup = &kb
 	_, _ = r.bot.Send(edit)
@@ -1667,7 +1710,31 @@ func (r *Router) handleUsageInPlace(chatID int64, messageID int, sess *session.U
 	loadingEdit.ParseMode = "HTML"
 	_, _ = r.bot.Send(loadingEdit)
 
-	out, perr := r.fetchUsage(sess.CWD)
+	var (
+		out       string
+		perr      *i18n.ParsedError
+		activeAcc *auth.AccountInfo
+	)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+		out, perr = r.fetchUsage(sess.CWD)
+	}()
+
+	go func() {
+		defer wg.Done()
+		acc, err := auth.GetActiveAccount()
+		if err == nil && acc != nil && acc.Email != "" {
+			acc.Tier = auth.GetActiveTier(acc.Email)
+			activeAcc = acc
+		}
+	}()
+
+	wg.Wait()
+
 	if perr != nil {
 		errKb := ErrorActionKeyboard(perr.ExtractedURLs, perr.IsEligibility, perr.IsQuotaLimit, lang)
 		edit := tgbotapi.NewEditMessageText(chatID, messageID, i18n.FormatErrorCard(lang, perr))
@@ -1678,7 +1745,7 @@ func (r *Router) handleUsageInPlace(chatID int64, messageID int, sess *session.U
 	}
 
 	kb := RefreshAndBackKeyboard("cmd_usage", "cmd_help_menu", lang)
-	edit := tgbotapi.NewEditMessageText(chatID, messageID, r.renderUsageBody(lang, out))
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, r.renderUsageBody(lang, out, activeAcc))
 	edit.ParseMode = "HTML"
 	edit.ReplyMarkup = &kb
 	_, _ = r.bot.Send(edit)
@@ -2324,6 +2391,7 @@ func (r *Router) handleAccountDetail(chatID int64, msgID int, sess *session.User
 	var acc *auth.AccountInfo
 	if isActive {
 		acc = activeAcc
+		acc.Tier = auth.GetActiveTier(acc.Email)
 	} else {
 		saved, err := auth.GetSavedAccount(email)
 		if err != nil {
@@ -2377,23 +2445,28 @@ func (r *Router) handleDeleteAccount(chatID int64, msgID int, sess *session.User
 		return
 	}
 
+	if sess.Language == "en" {
+		r.sendText(chatID, fmt.Sprintf("🗑️ Account <code>%s</code> deleted from saved accounts.", email))
+	} else {
+		r.sendText(chatID, fmt.Sprintf("🗑️ Akun <code>%s</code> berhasil dihapus dari daftar tersimpan.", email))
+	}
+
+	// Re-render accounts menu
 	accounts, _ := auth.ListSavedAccounts()
 	activeAcc, _ := auth.GetActiveAccount()
 	activeEmail := ""
 	if activeAcc != nil {
 		activeEmail = activeAcc.Email
 	}
-
-	text := i18n.FormatAccountsList(sess.Language, activeAcc, accounts)
 	kb := AccountsKeyboard(accounts, activeEmail, sess.Language)
 
 	if msgID > 0 {
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, i18n.FormatAccountsList(sess.Language, activeAcc, accounts))
 		edit.ParseMode = "HTML"
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
 	} else {
-		reply := tgbotapi.NewMessage(chatID, text)
+		reply := tgbotapi.NewMessage(chatID, i18n.FormatAccountsList(sess.Language, activeAcc, accounts))
 		reply.ParseMode = "HTML"
 		reply.ReplyMarkup = &kb
 		_, _ = r.bot.Send(reply)
@@ -2411,6 +2484,7 @@ func (r *Router) handleWhoami(chatID int64, sess *session.UserSession) {
 		return
 	}
 
+	activeAcc.Tier = auth.GetActiveTier(activeAcc.Email)
 	text := i18n.FormatAccountDetail(sess.Language, activeAcc)
 	kb := AccountDetailKeyboard(activeAcc.Email, true, sess.Language)
 	reply := tgbotapi.NewMessage(chatID, text)

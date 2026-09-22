@@ -1069,6 +1069,9 @@ func FormatAccountDetail(lang string, acc *auth.AccountInfo) string {
 		sb.WriteString("👤 <b>Account Details</b>\n\n")
 		sb.WriteString(fmt.Sprintf("• <b>Email:</b> <code>%s</code>\n", renderer.EscapeHTML(acc.Email)))
 		sb.WriteString(fmt.Sprintf("• <b>Name:</b> %s\n", renderer.EscapeHTML(acc.Name)))
+		if acc.Tier != "" {
+			sb.WriteString(fmt.Sprintf("• <b>Plan:</b> %s\n", auth.FormatTierBadge(acc.Tier)))
+		}
 		sb.WriteString(fmt.Sprintf("• <b>Status:</b> %s\n", status))
 		sb.WriteString(fmt.Sprintf("• <b>Auth Method:</b> %s\n", acc.AuthMethod))
 		if !acc.Expiry.IsZero() {
@@ -1083,6 +1086,9 @@ func FormatAccountDetail(lang string, acc *auth.AccountInfo) string {
 		sb.WriteString("👤 <b>Detail Akun Google</b>\n\n")
 		sb.WriteString(fmt.Sprintf("• <b>Email:</b> <code>%s</code>\n", renderer.EscapeHTML(acc.Email)))
 		sb.WriteString(fmt.Sprintf("• <b>Nama:</b> %s\n", renderer.EscapeHTML(acc.Name)))
+		if acc.Tier != "" {
+			sb.WriteString(fmt.Sprintf("• <b>Langganan:</b> %s\n", auth.FormatTierBadge(acc.Tier)))
+		}
 		sb.WriteString(fmt.Sprintf("• <b>Status:</b> %s\n", status))
 		sb.WriteString(fmt.Sprintf("• <b>Metode Login:</b> %s\n", acc.AuthMethod))
 		if !acc.Expiry.IsZero() {

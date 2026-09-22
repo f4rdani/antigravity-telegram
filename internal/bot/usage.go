@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"agy-tele/internal/auth"
 )
 
 // wibZone is UTC+7 for user-facing reset times.
@@ -184,8 +186,8 @@ func formatCountdown(lang string, d time.Duration) string {
 }
 
 // FormatUsageCard renders the beautified /usage card with per-limit remaining,
-// progress bars, WIB reset times and reset countdowns.
-func FormatUsageCard(lang string, entries []UsageEntry, now time.Time) string {
+// progress bars, WIB reset times, reset countdowns, and active account/plan info.
+func FormatUsageCard(lang string, entries []UsageEntry, now time.Time, acc ...*auth.AccountInfo) string {
 	isEN := lang == "en"
 
 	// Group by scope (first-seen order), five-hour row before weekly row.
@@ -219,9 +221,25 @@ func FormatUsageCard(lang string, entries []UsageEntry, now time.Time) string {
 	var sb strings.Builder
 	if isEN {
 		sb.WriteString("📊 <b>Antigravity Model Quota</b>\n")
+		if len(acc) > 0 && acc[0] != nil && acc[0].Email != "" {
+			sb.WriteString(fmt.Sprintf("👤 <b>Account:</b> <code>%s</code>\n", EscapeHTML(acc[0].Email)))
+			tier := acc[0].Tier
+			if tier == "" {
+				tier = "Free"
+			}
+			sb.WriteString(fmt.Sprintf("%s <b>Plan:</b> %s\n", auth.TierIcon(tier), EscapeHTML(tier)))
+		}
 		sb.WriteString(fmt.Sprintf("🕒 <i>Updated %s</i>\n", formatWIB(now, lang)))
 	} else {
 		sb.WriteString("📊 <b>Kuota Model Antigravity</b>\n")
+		if len(acc) > 0 && acc[0] != nil && acc[0].Email != "" {
+			sb.WriteString(fmt.Sprintf("👤 <b>Akun:</b> <code>%s</code>\n", EscapeHTML(acc[0].Email)))
+			tier := acc[0].Tier
+			if tier == "" {
+				tier = "Free"
+			}
+			sb.WriteString(fmt.Sprintf("%s <b>Langganan:</b> %s\n", auth.TierIcon(tier), EscapeHTML(tier)))
+		}
 		sb.WriteString(fmt.Sprintf("🕒 <i>Diperbarui %s</i>\n", formatWIB(now, lang)))
 	}
 

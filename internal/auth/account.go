@@ -51,6 +51,7 @@ type AccountInfo struct {
 	AuthMethod string    `json:"auth_method"`
 	IsActive   bool      `json:"is_active"`
 	FilePath   string    `json:"file_path"`
+	Tier       string    `json:"tier,omitempty"`
 }
 
 // GetTokenPath returns the path to the active antigravity-oauth-token
@@ -60,6 +61,24 @@ func GetTokenPath() string {
 		home = "/root"
 	}
 	return filepath.Join(home, ".gemini", "antigravity-cli", "antigravity-oauth-token")
+}
+
+// GetActiveTokenFile returns the parsed TokenFile from the active token path
+func GetActiveTokenFile() (*TokenFile, error) {
+	tokenPath := GetTokenPath()
+	data, err := os.ReadFile(tokenPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrNotLoggedIn
+		}
+		return nil, fmt.Errorf("gagal membaca active token: %w", err)
+	}
+
+	var tf TokenFile
+	if err := json.Unmarshal(data, &tf); err != nil {
+		return nil, fmt.Errorf("gagal unmarshal token JSON: %w", err)
+	}
+	return &tf, nil
 }
 
 // GetAccountsDir returns the directory where saved accounts are stored
@@ -260,6 +279,7 @@ func SwitchAccount(email string) (*AccountInfo, error) {
 	}
 	acc.IsActive = true
 	acc.FilePath = tokenPath
+	InvalidateTierCache("")
 	return acc, nil
 }
 
@@ -299,6 +319,7 @@ func SignOut() (*AccountInfo, error) {
 		return nil, fmt.Errorf("gagal menghapus token aktif: %w", err)
 	}
 
+	InvalidateTierCache("")
 	return active, nil
 }
 
@@ -313,6 +334,7 @@ func DeleteSavedAccount(email string) error {
 	if err == nil && active != nil && strings.EqualFold(active.Email, email) {
 		_ = os.Remove(GetTokenPath())
 	}
+	InvalidateTierCache(email)
 	return nil
 }
 

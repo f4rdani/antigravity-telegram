@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"agy-tele/internal/auth"
 )
 
 const sampleUsage = "Gemini Models\tWeekly Limit Remaining\t79%\t2026-09-24T16:01:16Z\n" +
@@ -129,5 +131,46 @@ func TestFormatCountdown(t *testing.T) {
 		if got := formatCountdown(c.lang, c.d); !strings.Contains(got, c.want) {
 			t.Errorf("formatCountdown(%s, %v) = %q; want containing %q", c.lang, c.d, got, c.want)
 		}
+	}
+}
+
+func TestFormatUsageCardWithAccount(t *testing.T) {
+	entries, ok := ParseUsageOutput(sampleUsage)
+	if !ok {
+		t.Fatal("parse failed")
+	}
+	now, _ := time.Parse(time.RFC3339, "2026-09-18T10:05:00Z")
+
+	acc := &auth.AccountInfo{
+		Email: "dev@example.com",
+		Tier:  "Pro",
+	}
+
+	// Indonesian
+	cardID := FormatUsageCard("id", entries, now, acc)
+	if !strings.Contains(cardID, "dev@example.com") {
+		t.Errorf("cardID missing email:\n%s", cardID)
+	}
+	if !strings.Contains(cardID, "<b>Langganan:</b> Pro") {
+		t.Errorf("cardID missing Langganan: Pro:\n%s", cardID)
+	}
+	if !strings.Contains(cardID, "⭐") {
+		t.Errorf("cardID missing star icon for Pro:\n%s", cardID)
+	}
+
+	// English with Ultra tier
+	accUltra := &auth.AccountInfo{
+		Email: "ultra@example.com",
+		Tier:  "Ultra",
+	}
+	cardEN := FormatUsageCard("en", entries, now, accUltra)
+	if !strings.Contains(cardEN, "ultra@example.com") {
+		t.Errorf("cardEN missing email:\n%s", cardEN)
+	}
+	if !strings.Contains(cardEN, "<b>Plan:</b> Ultra") {
+		t.Errorf("cardEN missing Plan: Ultra:\n%s", cardEN)
+	}
+	if !strings.Contains(cardEN, "💎") {
+		t.Errorf("cardEN missing diamond icon for Ultra:\n%s", cardEN)
 	}
 }
