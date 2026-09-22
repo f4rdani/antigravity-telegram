@@ -397,35 +397,71 @@ func GetStatusText(lang string, sess *session.UserSession, isRunning bool, activ
 func GetAutoDeleteText(lang string, currentLimit int, trackedCount int) string {
 	l := NormalizeLang(lang)
 
-	limitStr := fmt.Sprintf("%d turns", currentLimit)
-	if currentLimit <= 0 {
-		if l == "en" {
-			limitStr = "Disabled (0)"
-		} else {
-			limitStr = "Nonaktif (0)"
-		}
-	}
+	isActive := currentLimit > 0
 
 	if l == "en" {
+		var statusLine string
+		if isActive {
+			statusLine = fmt.Sprintf("🟢 <b>Active</b> — deletes older messages when chat exceeds <b>%d turns</b>", currentLimit)
+		} else {
+			statusLine = "🔴 <b>Inactive</b> — no messages will be auto-deleted"
+		}
+
+		trackedLine := fmt.Sprintf("• <b>Currently Tracked:</b> <code>%d turn(s)</code>", trackedCount)
+		if isActive && trackedCount >= currentLimit {
+			trackedLine += fmt.Sprintf(" <i>(limit reached — older messages will be cleaned on next turn)</i>")
+		} else if isActive {
+			remaining := currentLimit - trackedCount
+			trackedLine += fmt.Sprintf(" <i>(%d remaining before cleanup)</i>", remaining)
+		}
+
 		return fmt.Sprintf(
-			"🧹 <b>Telegram Chat Auto-Delete Settings</b>\n\n"+
-				"This feature automatically cleans older conversation messages in Telegram when the message count exceeds the limit. It keeps your Telegram app smooth and prevents mobile lag.\n\n"+
-				"• <b>Current Limit:</b> <code>%s</code>\n"+
-				"• <b>Currently Tracked:</b> <code>%d turns</code>\n\n"+
-				"<i>Note: This ONLY deletes messages inside Telegram chat. Session history, code artifacts, and transcripts on the Antigravity server remain completely safe and untouched.</i>",
-			limitStr,
-			trackedCount,
+			"🧹 <b>Telegram Chat Auto-Delete</b>\n\n"+
+				"%s\n\n"+
+				"• <b>Limit:</b> %s\n"+
+				"%s\n\n"+
+				"<i>Note: This ONLY deletes messages inside Telegram chat. Session history, code artifacts, and transcripts on the Antigravity server remain completely safe.</i>",
+			statusLine,
+			func() string {
+				if isActive {
+					return fmt.Sprintf("<code>%d turns</code>", currentLimit)
+				}
+				return "<code>Off</code>"
+			}(),
+			trackedLine,
 		)
 	}
 
+	// Indonesian
+	var statusLine string
+	if isActive {
+		statusLine = fmt.Sprintf("🟢 <b>Aktif</b> — pesan lama dihapus otomatis jika chat melebihi <b>%d turn</b>", currentLimit)
+	} else {
+		statusLine = "🔴 <b>Nonaktif</b> — tidak ada pesan yang akan dihapus otomatis"
+	}
+
+	trackedLine := fmt.Sprintf("• <b>Pesan Terlacak Saat Ini:</b> <code>%d turn</code>", trackedCount)
+	if isActive && trackedCount >= currentLimit {
+		trackedLine += " <i>(batas tercapai — pesan lama akan dibersihkan pada giliran berikutnya)</i>"
+	} else if isActive {
+		remaining := currentLimit - trackedCount
+		trackedLine += fmt.Sprintf(" <i>(%d turn lagi baru dibersihkan)</i>", remaining)
+	}
+
 	return fmt.Sprintf(
-		"🧹 <b>Pengaturan Auto-Delete Percakapan Telegram</b>\n\n"+
-			"Fitur ini secara otomatis menghapus pesan riwayat percakapan lama di Telegram jika sudah melampaui batas turn, sehingga aplikasi Telegram di ponsel Anda tetap ringan dan tidak lag.\n\n"+
-			"• <b>Batas Aktif:</b> <code>%s</code>\n"+
-			"• <b>Pesan Terlacak Saat Ini:</b> <code>%d turn</code>\n\n"+
-			"<i>Catatan: Fitur ini HANYA menghapus tampilan pesan di chat Telegram. Riwayat sesi, file transcript, dan kode di server Antigravity tetap tersimpan aman dan tidak terhapus.</i>",
-		limitStr,
-		trackedCount,
+		"🧹 <b>Pengaturan Auto-Delete Telegram</b>\n\n"+
+			"%s\n\n"+
+			"• <b>Batas:</b> %s\n"+
+			"%s\n\n"+
+			"<i>Catatan: Fitur ini HANYA menghapus tampilan pesan di chat Telegram. Riwayat sesi, file transcript, dan kode di server Antigravity tetap tersimpan aman.</i>",
+		statusLine,
+		func() string {
+			if isActive {
+				return fmt.Sprintf("<code>%d turn</code>", currentLimit)
+			}
+			return "<code>Nonaktif</code>"
+		}(),
+		trackedLine,
 	)
 }
 
@@ -1197,6 +1233,57 @@ func FormatAuthError(lang, errMsg string) string {
 		sb.WriteString("❌ <b>Login / Otorisasi Gagal:</b>\n\n")
 		sb.WriteString(fmt.Sprintf("<code>%s</code>\n\n", renderer.EscapeHTML(errMsg)))
 		sb.WriteString("Pastikan kode otorisasi benar dan belum kedaluwarsa, lalu coba kembali dengan tombol di bawah:")
+	}
+
+	return sb.String()
+}
+
+// FormatConversationHistory formats the last N user prompts from a session transcript
+// into a readable Telegram HTML card. Used after /resume to show conversation context.
+func FormatConversationHistory(lang string, title string, entries []session.ConversationHistoryEntry) string {
+	l := NormalizeLang(lang)
+	var sb strings.Builder
+
+	if l == "en" {
+		sb.WriteString(fmt.Sprintf("📜 <b>Recent History: %s</b>\n", renderer.EscapeHTML(title)))
+		sb.WriteString("<i>Last messages you sent in this session:</i>\n\n")
+	} else {
+		sb.WriteString(fmt.Sprintf("📜 <b>Riwayat Terakhir: %s</b>\n", renderer.EscapeHTML(title)))
+		sb.WriteString("<i>Pesan-pesan terakhir yang Anda kirim di sesi ini:</i>\n\n")
+	}
+
+	if len(entries) == 0 {
+		if l == "en" {
+			sb.WriteString("<i>No message history found for this session.</i>")
+		} else {
+			sb.WriteString("<i>Tidak ada riwayat pesan yang ditemukan untuk sesi ini.</i>")
+		}
+		return sb.String()
+	}
+
+	for i, e := range entries {
+		num := fmt.Sprintf("%d.", i+1)
+		text := e.Text
+		// Truncate long messages to keep card readable
+		runes := []rune(text)
+		if len(runes) > 200 {
+			text = string(runes[:197]) + "..."
+		}
+		// Collapse newlines for compact preview
+		text = strings.Join(strings.Fields(text), " ")
+
+		if e.Timestamp != "" {
+			sb.WriteString(fmt.Sprintf("<b>%s</b> <i>[%s]</i>\n", num, renderer.EscapeHTML(e.Timestamp)))
+		} else {
+			sb.WriteString(fmt.Sprintf("<b>%s</b>\n", num))
+		}
+		sb.WriteString(fmt.Sprintf("👤 %s\n\n", renderer.EscapeHTML(text)))
+	}
+
+	if l == "en" {
+		sb.WriteString("<i>💬 Send any message below to continue this conversation.</i>")
+	} else {
+		sb.WriteString("<i>💬 Kirim pesan apa saja untuk melanjutkan percakapan ini.</i>")
 	}
 
 	return sb.String()

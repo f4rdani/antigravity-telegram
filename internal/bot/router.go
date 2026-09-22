@@ -425,7 +425,7 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 		r.executeOneShot(chatID, sess.CWD, "💰 G1 Credits", "/credits", sess.Language)
 
 	case "/skills":
-		r.executeOneShot(chatID, sess.CWD, "🧰 Available Skills", "/skills", sess.Language)
+		r.executeOneShotSkills(chatID, sess.CWD, sess.Language)
 
 	case "/agents":
 		r.executeOneShot(chatID, sess.CWD, "🤖 Custom Agents", "/agents", sess.Language)
@@ -1196,13 +1196,20 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 				"• <b>Topik</b>: %s\n"+
 				"• <b>Workspace</b>: <code>%s</code>\n"+
 				"%s\n"+
-				"💬 <i>Silakan langsung kirim pesan apa saja di chat untuk melanjutkan percakapan ini.</i>",
+				"⏳ <i>Mengambil riwayat percakapan...</i>",
 			renderer.EscapeHTML(title), wsPath, timeLine,
 		))
 		edit.ParseMode = "HTML"
 		kb := ResumeConfirmedKeyboard(convID, sess.Language)
 		edit.ReplyMarkup = &kb
 		_, _ = r.bot.Send(edit)
+
+		// Kirim riwayat 8 pesan terakhir user sebagai pesan terpisah
+		go func() {
+			entries := session.GetConversationHistory(convID, 8)
+			histText := i18n.FormatConversationHistory(sess.Language, title, entries)
+			r.sendText(chatID, histText)
+		}()
 
 	case data == "cmd_usage":
 		r.handleUsageInPlace(chatID, msgID, sess)
@@ -1211,7 +1218,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "💰 G1 Credits", "/credits", "cmd_credits", sess.Language)
 
 	case data == "cmd_skills":
-		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "🧰 Available Skills", "/skills", "cmd_skills", sess.Language)
+		r.executeOneShotSkillsInPlace(chatID, msgID, sess.CWD, sess.Language)
 
 	case data == "cmd_status":
 		task := r.getActiveTask(userID)
@@ -1465,7 +1472,9 @@ func (r *Router) executeOneShot(chatID int64, cwd string, title string, command 
 	if lang == "en" {
 		loadingText = fmt.Sprintf("⏳ Executing <code>%s</code>...", command)
 	}
-	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, loadingText))
+	loadingMsgCfg := tgbotapi.NewMessage(chatID, loadingText)
+	loadingMsgCfg.ParseMode = "HTML"
+	loadingMsg, err := r.bot.Send(loadingMsgCfg)
 	if err != nil {
 		return
 	}
@@ -1559,6 +1568,117 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 
 	kb := RefreshAndBackKeyboard(refreshCmd, "cmd_help_menu", lang)
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, FormatCodeBlock(title, out))
+	edit.ParseMode = "HTML"
+	edit.ReplyMarkup = &kb
+	_, _ = r.bot.Send(edit)
+}
+
+// executeOneShotSkills runs /skills and renders output as a clean HTML card
+// using FormatSkillsList instead of a raw code block.
+func (r *Router) executeOneShotSkills(chatID int64, cwd string, lang string) {
+	ctx := context.Background()
+
+	stopTyping := make(chan struct{})
+	go func() {
+		_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopTyping:
+				return
+			case <-ticker.C:
+				_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+			}
+		}
+	}()
+	defer close(stopTyping)
+
+	var loadingText string
+	if lang == "en" {
+		loadingText = "⏳ Loading skills list..."
+	} else {
+		loadingText = "⏳ Memuat daftar skills..."
+	}
+	loadingMsgCfg := tgbotapi.NewMessage(chatID, loadingText)
+	loadingMsgCfg.ParseMode = "HTML"
+	loadingMsg, err := r.bot.Send(loadingMsgCfg)
+	if err != nil {
+		return
+	}
+
+	out, err := r.oneShot.Run(ctx, cwd, "/skills")
+	lowerOut := strings.ToLower(out)
+	if err != nil || strings.Contains(lowerOut, "eligibility check failed") || strings.Contains(lowerOut, "resource_exhausted") {
+		rawErr := out
+		if err != nil {
+			rawErr = err.Error()
+		}
+		pe := i18n.ParseError(rawErr)
+		errKb := ErrorActionKeyboard(pe.ExtractedURLs, pe.IsEligibility, pe.IsQuotaLimit, lang)
+		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatErrorCard(lang, pe))
+		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &errKb
+		_, _ = r.bot.Send(edit)
+		return
+	}
+
+	kb := CloseOnlyKeyboard(lang)
+	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, FormatSkillsList(lang, out))
+	edit.ParseMode = "HTML"
+	edit.ReplyMarkup = &kb
+	_, _ = r.bot.Send(edit)
+}
+
+// executeOneShotSkillsInPlace runs /skills in an existing message and renders
+// output as a clean HTML card using FormatSkillsList.
+func (r *Router) executeOneShotSkillsInPlace(chatID int64, messageID int, cwd string, lang string) {
+	ctx := context.Background()
+
+	stopTyping := make(chan struct{})
+	go func() {
+		_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopTyping:
+				return
+			case <-ticker.C:
+				_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+			}
+		}
+	}()
+	defer close(stopTyping)
+
+	var loadingText string
+	if lang == "en" {
+		loadingText = "⏳ Loading skills list..."
+	} else {
+		loadingText = "⏳ Memuat daftar skills..."
+	}
+	loadingEdit := tgbotapi.NewEditMessageText(chatID, messageID, loadingText)
+	loadingEdit.ParseMode = "HTML"
+	_, _ = r.bot.Send(loadingEdit)
+
+	out, err := r.oneShot.Run(ctx, cwd, "/skills")
+	lowerOut := strings.ToLower(out)
+	if err != nil || strings.Contains(lowerOut, "eligibility check failed") || strings.Contains(lowerOut, "resource_exhausted") {
+		rawErr := out
+		if err != nil {
+			rawErr = err.Error()
+		}
+		pe := i18n.ParseError(rawErr)
+		errKb := ErrorActionKeyboard(pe.ExtractedURLs, pe.IsEligibility, pe.IsQuotaLimit, lang)
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, i18n.FormatErrorCard(lang, pe))
+		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &errKb
+		_, _ = r.bot.Send(edit)
+		return
+	}
+
+	kb := RefreshAndBackKeyboard("cmd_skills", "cmd_help_menu", lang)
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, FormatSkillsList(lang, out))
 	edit.ParseMode = "HTML"
 	edit.ReplyMarkup = &kb
 	_, _ = r.bot.Send(edit)
@@ -2047,6 +2167,8 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 			finalText = i18n.FormatErrorCard(sess.Language, errorDetails)
 			kb := ErrorActionKeyboard(errorDetails.ExtractedURLs, errorDetails.IsEligibility, errorDetails.IsQuotaLimit, sess.Language)
 			actionKb = &kb
+			// Only reset conversation for actual quota/auth/eligibility issues.
+			// 503 Service Unavailable is transient — session stays intact so user can retry.
 			if errorDetails.IsQuotaLimit || errorDetails.IsEligibility || errorDetails.IsAuth {
 				r.sm.ResetConversation(opts.UserID)
 			}
@@ -2069,6 +2191,8 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 			finalText = i18n.FormatErrorCard(sess.Language, errorDetails)
 			kb := ErrorActionKeyboard(errorDetails.ExtractedURLs, errorDetails.IsEligibility, errorDetails.IsQuotaLimit, sess.Language)
 			actionKb = &kb
+			// Only reset conversation for actual quota/auth/eligibility issues.
+			// 503 Service Unavailable is transient — session stays intact so user can retry.
 			if errorDetails.IsQuotaLimit || errorDetails.IsEligibility || errorDetails.IsAuth {
 				r.sm.ResetConversation(opts.UserID)
 			}

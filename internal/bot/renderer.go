@@ -12,7 +12,7 @@ import (
 	"agy-tele/internal/session"
 )
 
-const AppVersion = "v1.0.16"
+const AppVersion = "v1.0.20"
 
 func FormatHelp(lang string) string {
 	return i18n.GetHelpText(lang, AppVersion)
@@ -107,6 +107,60 @@ func FormatArtifacts(lang string, items []artifact.Item) string {
 
 func FormatArtifactDetail(lang string, it artifact.Item) string {
 	return i18n.GetArtifactDetailText(lang, it)
+}
+
+// FormatSkillsList parses raw agy /skills output and renders it as a clean
+// Telegram HTML card. Each non-empty line is split into "name description" —
+// the first token becomes bold, the rest italic — so it renders like:
+//
+//	🧰 Available Skills
+//	• <b>skill-name</b>
+//	  <i>Description text...</i>
+func FormatSkillsList(lang string, raw string) string {
+	var sb strings.Builder
+
+	if lang == "en" {
+		sb.WriteString("🧰 <b>Available Skills</b>\n\n")
+	} else {
+		sb.WriteString("🧰 <b>Daftar Skills yang Terpasang</b>\n\n")
+	}
+
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	count := 0
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// Skip header lines like "Available skills:" or "---"
+		lower := strings.ToLower(line)
+		if strings.HasPrefix(lower, "available") || strings.HasPrefix(line, "---") || strings.HasPrefix(line, "===") {
+			continue
+		}
+		// Split: first word = skill name, rest = description
+		parts := strings.SplitN(line, " ", 2)
+		name := EscapeHTML(parts[0])
+		desc := ""
+		if len(parts) > 1 {
+			desc = strings.TrimSpace(parts[1])
+		}
+		sb.WriteString(fmt.Sprintf("• <b>%s</b>\n", name))
+		if desc != "" {
+			sb.WriteString(fmt.Sprintf("  <i>%s</i>\n", EscapeHTML(desc)))
+		}
+		sb.WriteString("\n")
+		count++
+	}
+
+	if count == 0 {
+		if lang == "en" {
+			sb.WriteString("<i>No skills installed yet.</i>")
+		} else {
+			sb.WriteString("<i>Belum ada skill yang terpasang.</i>")
+		}
+	}
+
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func FormatCodeBlock(title string, content string) string {

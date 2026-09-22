@@ -169,3 +169,154 @@ func formatFriendlyTime(t time.Time) string {
 	}
 	return t.Format("02/01 15:04")
 }
+
+// ConversationHistoryEntry holds a single user prompt from the transcript.
+type ConversationHistoryEntry struct {
+	Timestamp string
+	Text      string
+}
+
+// GetConversationHistory reads the transcript.jsonl for the given conversationID
+// and returns the last `limit` user prompts. It strips XML-style tags that the
+// Telegram bridge wraps user input in (e.g. <USER_REQUEST>…</USER_REQUEST>).
+func GetConversationHistory(conversationID string, limit int) []ConversationHistoryEntry {
+	if conversationID == "" || limit <= 0 {
+		return nil
+	}
+
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		homeDir = os.Getenv("HOME")
+		if homeDir == "" {
+			homeDir = "/root"
+		}
+	}
+
+	transcriptPath := filepath.Join(homeDir, ".gemini", "antigravity-cli", "brain",
+		conversationID, ".system_generated", "logs", "transcript.jsonl")
+
+	f, err := os.Open(transcriptPath)
+	if err != nil {
+		return nil
+	}
+	defer f.Close()
+
+	// Read all lines first, then pick last N user inputs
+	type rawEntry struct {
+		Type      string `json:"type"`
+		Content   string `json:"content"`
+		CreatedAt string `json:"created_at"`
+	}
+
+	var all []ConversationHistoryEntry
+
+	buf := make([]byte, 0, 64*1024)
+	tmp := make([]byte, 4096)
+	var lineStart int
+	fullData := []byte{}
+
+	// Read whole file (transcripts can be large; we only need user lines)
+	for {
+		n, rerr := f.Read(tmp)
+		if n > 0 {
+			fullData = append(fullData, tmp[:n]...)
+		}
+		if rerr != nil {
+			break
+		}
+	}
+	_ = buf
+
+	lines := strings.Split(string(fullData), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var entry rawEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+		if entry.Type != "USER_INPUT" || entry.Content == "" {
+			continue
+		}
+
+		text := stripTranscriptTags(entry.Content)
+		if text == "" {
+			continue
+		}
+
+		ts := ""
+		if len(entry.CreatedAt) >= 16 {
+			// "2026-09-22T11:21:16+08:00" -> "22/09 19:21"
+			t, perr := time.Parse(time.RFC3339, entry.CreatedAt)
+			if perr == nil {
+				ts = t.Local().Format("02/01 15:04")
+			} else {
+				ts = entry.CreatedAt[:16]
+			}
+		}
+
+		all = append(all, ConversationHistoryEntry{
+			Timestamp: ts,
+			Text:      text,
+		})
+	}
+	_ = lineStart
+
+	if len(all) == 0 {
+		return nil
+	}
+
+	// Return last `limit` entries
+	if len(all) > limit {
+		all = all[len(all)-limit:]
+	}
+	return all
+}
+
+// stripTranscriptTags removes XML-style wrapper tags the Telegram bridge inserts:
+// <USER_REQUEST>…</USER_REQUEST>, <ADDITIONAL_METADATA>…</ADDITIONAL_METADATA>, etc.
+// and returns a clean user message.
+func stripTranscriptTags(raw string) string {
+	// Remove block tags and their content for metadata sections
+	blockers := []string{"ADDITIONAL_METADATA", "USER_SETTINGS_CHANGE"}
+	for _, tag := range blockers {
+		open := "<" + tag + ">"
+		close := "</" + tag + ">"
+		for {
+			start := strings.Index(raw, open)
+			if start < 0 {
+				break
+			}
+			end := strings.Index(raw, close)
+			if end < 0 {
+				raw = raw[:start]
+				break
+			}
+			raw = raw[:start] + raw[end+len(close):]
+		}
+	}
+
+	// Strip remaining XML-like tags (keep content inside USER_REQUEST)
+	raw = strings.ReplaceAll(raw, "<USER_REQUEST>", "")
+	raw = strings.ReplaceAll(raw, "</USER_REQUEST>", "")
+
+	// Collapse multiple blank lines
+	lines := strings.Split(raw, "\n")
+	var out []string
+	blank := 0
+	for _, l := range lines {
+		trimmed := strings.TrimSpace(l)
+		if trimmed == "" {
+			blank++
+			if blank <= 1 {
+				out = append(out, "")
+			}
+		} else {
+			blank = 0
+			out = append(out, trimmed)
+		}
+	}
+	return strings.TrimSpace(strings.Join(out, "\n"))
+}

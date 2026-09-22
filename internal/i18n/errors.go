@@ -14,13 +14,14 @@ var (
 
 // ParsedError holds classified error information and extracted links
 type ParsedError struct {
-	Raw           string
-	Title         string
-	CleanMessage  string
-	ExtractedURLs []string
-	IsEligibility bool
-	IsQuotaLimit  bool
-	IsAuth        bool
+	Raw                  string
+	Title                string
+	CleanMessage         string
+	ExtractedURLs        []string
+	IsEligibility        bool
+	IsQuotaLimit         bool
+	IsAuth               bool
+	IsServiceUnavailable bool
 }
 
 // ExtractURLs returns all valid URLs found in text, stripping trailing punctuation
@@ -63,10 +64,17 @@ func ParseError(raw string) *ParsedError {
 		pe.Title = "Eligibility Check Failed"
 	} else if strings.Contains(lower, "quota") || strings.Contains(lower, "resource_exhausted") ||
 		strings.Contains(lower, "usage limit") || strings.Contains(lower, "rate limit") ||
-		strings.Contains(lower, "code 429") || strings.Contains(lower, "code 503") ||
-		strings.Contains(lower, "capacity available") {
+		strings.Contains(lower, "code 429") {
+		// True quota/rate-limit errors: quota is actually exhausted
 		pe.IsQuotaLimit = true
 		pe.Title = "Usage Limit / Quota Exceeded"
+	} else if strings.Contains(lower, "unavailable") || strings.Contains(lower, "code 503") ||
+		strings.Contains(lower, "capacity available") ||
+		strings.Contains(lower, "service is currently unavailable") {
+		// 503 UNAVAILABLE = server temporarily down, NOT a quota issue.
+		// Session should NOT be reset; user can retry shortly.
+		pe.IsServiceUnavailable = true
+		pe.Title = "Service Temporarily Unavailable"
 	} else if strings.Contains(lower, "invalid_grant") || strings.Contains(lower, "unauthenticated") ||
 		strings.Contains(lower, "authentication required") {
 		pe.IsAuth = true
@@ -122,6 +130,21 @@ func FormatErrorCard(lang string, pe *ParsedError) string {
 			sb.WriteString(fmt.Sprintf("<code>%s</code>\n\n", renderer.EscapeHTML(pe.CleanMessage)))
 			sb.WriteString("🔄 <i>Sesi percakapan telah direset otomatis agar pesan selanjutnya tidak terkendala sesi lama.</i>\n")
 			sb.WriteString("💡 <i>Anda dapat beralih ke akun Google lain via /accounts atau cek sisa kuota via /quota.</i>")
+		}
+		return sb.String()
+	}
+
+	if pe.IsServiceUnavailable {
+		if l == "en" {
+			sb.WriteString("⏳ <b>Service Temporarily Unavailable:</b>\n")
+			sb.WriteString(fmt.Sprintf("<code>%s</code>\n\n", renderer.EscapeHTML(pe.CleanMessage)))
+			sb.WriteString("🔄 <i>The Google API server is temporarily unavailable (503). Your session is still intact — please try again in a moment.</i>\n")
+			sb.WriteString("💡 <i>If the issue persists, you can switch accounts via /accounts.</i>")
+		} else {
+			sb.WriteString("⏳ <b>Server Sedang Tidak Tersedia (Sementara):</b>\n")
+			sb.WriteString(fmt.Sprintf("<code>%s</code>\n\n", renderer.EscapeHTML(pe.CleanMessage)))
+			sb.WriteString("🔄 <i>Server Google API sedang sibuk / sementara tidak tersedia (503). Sesi Anda tetap aman — silakan coba kirim pesan lagi sebentar lagi.</i>\n")
+			sb.WriteString("💡 <i>Jika masih bermasalah, coba beralih akun via /accounts.</i>")
 		}
 		return sb.String()
 	}
