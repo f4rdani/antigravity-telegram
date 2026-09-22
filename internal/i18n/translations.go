@@ -98,6 +98,9 @@ var translations = map[string]map[string]string{
 		"btn_saved_accounts":         "👥 Daftar Akun Tersimpan",
 		"btn_open_verify_link":       "🌐 Buka Link Verifikasi",
 		"btn_open_link":              "🌐 Buka Tautan",
+		"btn_view_queue":             "📋 Lihat Antrean",
+		"btn_clear_queue":            "🧹 Hapus Antrean",
+		"btn_cancel_all":             "🛑 Hentikan Semua",
 	},
 	"en": {
 		"err_occurred":               "An error occurred:",
@@ -152,6 +155,9 @@ var translations = map[string]map[string]string{
 		"btn_saved_accounts":         "👥 Saved Accounts List",
 		"btn_open_verify_link":       "🌐 Open Verification Link",
 		"btn_open_link":              "🌐 Open Link",
+		"btn_view_queue":             "📋 View Queue",
+		"btn_clear_queue":            "🧹 Clear Queue",
+		"btn_cancel_all":             "🛑 Stop Everything",
 	},
 }
 
@@ -170,7 +176,9 @@ func GetHelpText(lang, version string) string {
 		sb.WriteString("• <code>/plan &lt;task&gt;</code> — Run structured task planning\n")
 		sb.WriteString("• <code>/goal &lt;task&gt;</code> — Run long-running autonomous task\n")
 		sb.WriteString("• <code>/continue</code> — Continue the last conversation session directly\n")
-		sb.WriteString("• <code>/cancel</code> or <code>/stop</code> — Stop the currently running process\n\n")
+		sb.WriteString("• <code>/cancel</code> or <code>/stop</code> — Stop the currently running process\n")
+		sb.WriteString("• <code>/queue</code> — View explicit FIFO message queue (auto-run in order)\n")
+		sb.WriteString("• <code>/clearqueue</code> — Drop all pending queued messages\n\n")
 
 		sb.WriteString("<b>📊 CLI Status & Quota (Mode A):</b>\n")
 		sb.WriteString("• <code>/usage</code> or <code>/quota</code> — Check 5-hour & weekly rate limits\n")
@@ -208,7 +216,9 @@ func GetHelpText(lang, version string) string {
 		sb.WriteString("• <code>/plan &lt;task&gt;</code> — Jalankan perencanaan terstruktur\n")
 		sb.WriteString("• <code>/goal &lt;task&gt;</code> — Jalankan task autonomous jangka panjang\n")
 		sb.WriteString("• <code>/continue</code> — Lanjutkan sesi obrolan terakhir langsung\n")
-		sb.WriteString("• <code>/cancel</code> atau <code>/stop</code> — Hentikan proses yang sedang berjalan\n\n")
+		sb.WriteString("• <code>/cancel</code> atau <code>/stop</code> — Hentikan proses yang sedang berjalan\n")
+		sb.WriteString("• <code>/queue</code> — Lihat antrean pesan FIFO (jalan otomatis berurutan)\n")
+		sb.WriteString("• <code>/clearqueue</code> — Hapus semua pesan tertunda dalam antrean\n\n")
 
 		sb.WriteString("<b>📊 CLI Status & Kuota (Mode A):</b>\n")
 		sb.WriteString("• <code>/usage</code> atau <code>/quota</code> — Cek limit 5 jam & mingguan\n")

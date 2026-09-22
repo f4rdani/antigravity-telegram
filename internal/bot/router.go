@@ -41,18 +41,30 @@ type Router struct {
 	authMgr      *auth.AuthManager
 	taskMu       sync.Mutex
 	activeTasks  map[int64]*ActiveTask
+	queueMu      sync.Mutex
+	// pendingQueues holds FIFO queued agent turns per user while a task is running.
+	// Queue is explicit: every message received during a run is either executed
+	// immediately (instant commands) or enqueued with a position number — never silently dropped.
+	pendingQueues map[int64][]*QueuedItem
+	busyMu        sync.Mutex
+	// busyCards tracks one dynamic live status card per user, edited in place
+	// (duration ticks, positions shift, queued -> running -> done) so the
+	// feedback never looks frozen/stuck.
+	busyCards map[int64]*BusyCard
 }
 
 func NewRouter(cfg *config.Config, bot *tgbotapi.BotAPI, sm *session.SessionManager) *Router {
 	return &Router{
-		cfg:          cfg,
-		bot:          bot,
-		sm:           sm,
-		oneShot:      engine.NewOneShotRunner(cfg.Agy.BinaryPath),
-		streamRunner: engine.NewStreamAgentRunner(cfg.Agy.BinaryPath),
-		accumulator:  NewMessageAccumulator(),
-		authMgr:      auth.NewAuthManager(cfg.Agy.BinaryPath),
-		activeTasks:  make(map[int64]*ActiveTask),
+		cfg:           cfg,
+		bot:           bot,
+		sm:            sm,
+		oneShot:       engine.NewOneShotRunner(cfg.Agy.BinaryPath),
+		streamRunner:  engine.NewStreamAgentRunner(cfg.Agy.BinaryPath),
+		accumulator:   NewMessageAccumulator(),
+		authMgr:       auth.NewAuthManager(cfg.Agy.BinaryPath),
+		activeTasks:   make(map[int64]*ActiveTask),
+		pendingQueues: make(map[int64][]*QueuedItem),
+		busyCards:     make(map[int64]*BusyCard),
 	}
 }
 
@@ -143,12 +155,22 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		}
 	}
 
-	// Immediate /cancel or /stop interceptor (always allowed even if a task is running)
+	// Immediate /cancel or /stop interceptor (always allowed even if a task is running).
+	// Keeps the explicit FIFO queue intact: current task stops, next queued item auto-starts.
 	if text != "" && (strings.EqualFold(text, "/cancel") || strings.EqualFold(text, "/stop")) {
+		qlen := r.queueLength(userID)
 		if r.cancelActiveTask(userID, chatID) {
-			r.sendText(chatID, "🛑 <b>Proses aktif berhasil dihentikan!</b>")
+			if qlen > 0 {
+				r.sendText(chatID, fmt.Sprintf("🛑 <b>Tugas aktif dihentikan.</b>\n⏭️ <i>Antrean %d pesan tetap tersimpan dan akan dijalankan otomatis berikutnya.</i>\n<i>Gunakan /clearqueue untuk menghapus antrean.</i>", qlen))
+			} else {
+				r.sendText(chatID, "🛑 <b>Proses aktif berhasil dihentikan!</b>")
+			}
 		} else {
-			r.sendText(chatID, "ℹ️ Tidak ada proses yang sedang aktif berjalan.")
+			if qlen > 0 {
+				r.sendQueueCard(chatID, sess)
+			} else {
+				r.sendText(chatID, "ℹ️ Tidak ada proses yang sedang aktif berjalan.")
+			}
 		}
 		return
 	}
@@ -171,52 +193,15 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 		}
 	}
 
-	// Concurrency Guard: prevent duplicate concurrent agy processes for the same user
-	if task := r.getActiveTask(userID); task != nil {
-		// Allow /status to inspect ongoing progress
-		if text != "" && strings.HasPrefix(strings.ToLower(text), "/status") {
-			dur := time.Since(task.StartedAt).Round(time.Second)
-			promptDesc := fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
-			reply := tgbotapi.NewMessage(chatID, FormatStatus(sess.Language, sess, true, promptDesc))
-			reply.ParseMode = "HTML"
-			reply.ReplyMarkup = StatusActionKeyboard(sess.Language)
-			_, _ = r.bot.Send(reply)
-			return
-		}
-
-		dur := time.Since(task.StartedAt).Round(time.Second)
-		promptSummary := task.Prompt
-		if len(promptSummary) > 50 {
-			promptSummary = promptSummary[:47] + "..."
-		}
-
-		// Rate limit warning cards to avoid spamming user if multiple chunks arrive during active task
-		r.taskMu.Lock()
-		now := time.Now()
-		shouldWarn := now.Sub(task.LastWarningTime) > 2*time.Second
-		if shouldWarn {
-			task.LastWarningTime = now
-		}
-		r.taskMu.Unlock()
-
-		if shouldWarn {
-			warningMsg := fmt.Sprintf(
-				"⚠️ <b>Antigravity sedang aktif memproses instruksi:</b>\n"+
-					"• <i>\"%s\"</i>\n"+
-					"• <b>Durasi berjalan:</b> <code>%s</code>\n\n"+
-					"⏳ <i>Harap tunggu hingga proses selesai sebelum mengirim pesan baru, atau gunakan tombol di bawah untuk membatalkan proses yang sedang berjalan.</i>",
-				renderer.EscapeHTML(promptSummary), dur.String(),
-			)
-			reply := tgbotapi.NewMessage(chatID, warningMsg)
-			reply.ParseMode = "HTML"
-			kb := ActiveTaskKeyboard(sess.Language)
-			reply.ReplyMarkup = &kb
-			_, _ = r.bot.Send(reply)
-		}
-		return
-	}
+	// NOTE: No more "drop message while busy" guard here.
+	// Queueable prompts always flow into the debounce accumulator below, even when
+	// a task is running. The explicit FIFO queue decision happens in
+	// dispatchAccumulatedMessage / tryEnqueueOrExecute, so split long messages
+	// are still merged correctly and every follow-up gets a clear position number.
 
 	// Check if message contains media/file attachments (Photo, Document, Video, Audio, Voice)
+	// Media is downloaded immediately (so the file is not lost), then the analysis
+	// prompt is either executed now or explicitly queued if a task is running.
 	hasMedia := len(msg.Photo) > 0 || msg.Document != nil || msg.Video != nil || msg.Audio != nil || msg.Voice != nil
 	if hasMedia {
 		r.accumulator.Cancel(userID)
@@ -238,7 +223,7 @@ func (r *Router) HandleUpdate(update tgbotapi.Update) {
 				prompt = fmt.Sprintf("User telah mengunggah file ke workspace: %s\n\nSilakan periksa dan jelaskan/analisis isi dari file tersebut.", media.FilePath)
 			}
 
-			r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+			r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 				UserID:         userID,
 				Prompt:         prompt,
 				CWD:            sess.CWD,
@@ -285,6 +270,94 @@ func formatNumber(n int) string {
 	return strings.Join(res, ",")
 }
 
+// IsQueueableAgentCommand reports whether a slash command should be queued
+// (instead of executed instantly) when a task is already running.
+// Instant control commands (/cancel, /status, /queue, /model, ...) always run immediately.
+// Agent-turn commands (/plan, /goal, /continue, unknown skill commands) are queueable.
+func IsQueueableAgentCommand(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	if !strings.HasPrefix(trimmed, "/") {
+		return true // plain text prompt is always queueable
+	}
+	parts := strings.Fields(trimmed)
+	if len(parts) == 0 {
+		return false
+	}
+	cmd := strings.ToLower(parts[0])
+	switch cmd {
+	case "/plan", "/goal", "/continue":
+		return true
+	case "/cancel", "/stop", "/status", "/start", "/help",
+		"/model", "/effort", "/perm", "/permission", "/cwd", "/ls", "/pwd", "/clear",
+		"/sessions", "/resume", "/switch", "/new", "/lang", "/language", "/usage",
+		"/quota", "/credits", "/skills", "/agents", "/changelog",
+		"/artifact", "/artifacts", "/file", "/autodelete",
+		"/signout", "/logout", "/signin", "/login",
+		"/accounts", "/account", "/whoami", "/code",
+		"/queue", "/clearqueue", "/queuelist":
+		return false
+	default:
+		return true // unknown slash / skill command -> forwarded to agent -> queueable
+	}
+}
+
+func truncatePreview(s string, max int) string {
+	t := strings.TrimSpace(strings.ReplaceAll(s, "\n", " "))
+	if len(t) <= max {
+		return t
+	}
+	return t[:max-3] + "..."
+}
+
+// tryEnqueueOrExecute executes the agent turn immediately when idle,
+// or appends it to the explicit FIFO queue when busy.
+// Returns true if queued, false if executed immediately.
+func (r *Router) tryEnqueueOrExecute(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, userMsgIDs ...int) bool {
+	r.ensureQueueInit()
+	task := r.getActiveTask(opts.UserID)
+	if task == nil {
+		r.executeAgentTurn(chatID, sess, opts, userMsgIDs...)
+		return false
+	}
+	item := &QueuedItem{
+		ChatID:         chatID,
+		UserID:         opts.UserID,
+		Prompt:         opts.Prompt,
+		Mode:           opts.Mode,
+		IsGoal:         opts.IsGoal,
+		CWD:            opts.CWD,
+		ConversationID: opts.ConversationID,
+		PermissionMode: opts.PermissionMode,
+		Model:          opts.Model,
+		Effort:         opts.Effort,
+		PrintTimeout:   opts.PrintTimeout,
+		UserMsgIDs:     append([]int(nil), userMsgIDs...),
+	}
+	pos := r.enqueue(opts.UserID, item)
+	if pos < 0 {
+		r.sendText(chatID, fmt.Sprintf("⚠️ <b>Antrean penuh (%d/%d).</b>\nTugas aktif masih berjalan. Tunggu hingga selesai atau gunakan /cancel, lalu kirim ulang pesan Anda.", MaxQueuePerUser, MaxQueuePerUser))
+		return true
+	}
+	r.sendQueuedConfirmation(chatID, sess, item, pos)
+	return true
+}
+
+func (r *Router) sendQueuedConfirmation(chatID int64, sess *session.UserSession, item *QueuedItem, pos int) {
+	total := r.queueLength(item.UserID)
+	hl := queuedHighlight(sess.Language, pos, total, truncatePreview(item.Prompt, 120))
+	r.upsertBusyCard(chatID, item.UserID, sess.Language, hl)
+}
+
+func (r *Router) sendQueueCard(chatID int64, sess *session.UserSession) {
+	items := r.listQueue(sess.UserID)
+	task := r.getActiveTask(sess.UserID)
+	reply := tgbotapi.NewMessage(chatID, FormatQueueList(sess.Language, task, items))
+	reply.ParseMode = "HTML"
+	kb := QueueActionKeyboard(sess.Language)
+	reply.ReplyMarkup = &kb
+	_, _ = r.bot.Send(reply)
+}
+
 func (r *Router) dispatchAccumulatedMessage(batch *AccumulatedBatch, combinedText string) {
 	chatID := batch.ChatID
 	userID := batch.UserID
@@ -310,8 +383,9 @@ func (r *Router) dispatchAccumulatedMessage(batch *AccumulatedBatch, combinedTex
 		return
 	}
 
-	// Default: Stream Agent prompt with all user message IDs tracked for auto-delete
-	r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+	// Default: Stream Agent prompt with all user message IDs tracked for auto-delete.
+	// If a task is already running, this is explicitly queued (never dropped).
+	r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 		UserID:         userID,
 		Prompt:         combinedText,
 		CWD:            sess.CWD,
@@ -345,7 +419,7 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 		_, _ = r.bot.Send(reply)
 
 	case "/usage", "/quota":
-		r.executeOneShot(chatID, sess.CWD, "📊 Model Quota & Limit", "/usage", sess.Language)
+		r.handleUsage(chatID, sess)
 
 	case "/credits":
 		r.executeOneShot(chatID, sess.CWD, "💰 G1 Credits", "/credits", sess.Language)
@@ -367,10 +441,33 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 			dur := time.Since(task.StartedAt).Round(time.Second)
 			taskDesc = fmt.Sprintf("%s (%s)", task.Prompt, dur.String())
 		}
-		reply := tgbotapi.NewMessage(chatID, FormatStatus(sess.Language, sess, isRunning, taskDesc))
+		queueItems := r.listQueue(userID)
+		queueSection := FormatQueueSection(sess.Language, queueItems)
+		reply := tgbotapi.NewMessage(chatID, FormatStatusWithQueue(sess.Language, sess, isRunning, taskDesc, queueSection))
 		reply.ParseMode = "HTML"
 		reply.ReplyMarkup = StatusActionKeyboard(sess.Language)
 		_, _ = r.bot.Send(reply)
+
+	case "/queue", "/queuelist":
+		r.sendQueueCard(chatID, sess)
+
+	case "/clearqueue":
+		removed := r.clearQueue(userID)
+		if removed > 0 {
+			if sess.Language == "en" {
+				r.sendText(chatID, fmt.Sprintf("🧹 <b>Queue cleared:</b> %d pending message(s) dropped. Active task (if any) keeps running.", removed))
+			} else {
+				r.sendText(chatID, fmt.Sprintf("🧹 <b>Antrean dihapus:</b> %d pesan tertunda dibuang. Tugas aktif (jika ada) tetap berjalan.", removed))
+			}
+		} else {
+			if sess.Language == "en" {
+				r.sendText(chatID, "ℹ️ Queue is already empty — nothing to clear.")
+			} else {
+				r.sendText(chatID, "ℹ️ Antrean sudah kosong — tidak ada yang dihapus.")
+			}
+		}
+		// Keep the live card truthful: re-render without the dropped items.
+		r.refreshBusyCard(userID)
 
 	case "/model":
 		if args != "" {
@@ -595,7 +692,7 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 
 	case "/continue":
 		r.sendText(chatID, "⏳ Melanjutkan sesi percakapan sebelumnya...")
-		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+		r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 			UserID:         userID,
 			Prompt:         "Continue the previous task.",
 			CWD:            sess.CWD,
@@ -614,10 +711,19 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 		_, _ = r.bot.Send(reply)
 
 	case "/cancel", "/stop":
+		qlen := r.queueLength(userID)
 		if r.cancelActiveTask(userID, chatID) {
-			r.sendText(chatID, "🛑 <b>Proses aktif berhasil dihentikan!</b>")
+			if qlen > 0 {
+				r.sendText(chatID, fmt.Sprintf("🛑 <b>Tugas aktif dihentikan.</b>\n⏭️ <i>%d pesan dalam antrean tetap tersimpan dan akan dijalankan otomatis berikutnya.</i>\n<i>Gunakan /clearqueue untuk menghapus antrean.</i>", qlen))
+			} else {
+				r.sendText(chatID, "🛑 <b>Proses aktif berhasil dihentikan!</b>")
+			}
 		} else {
-			r.sendText(chatID, "ℹ️ Tidak ada proses yang sedang aktif berjalan.")
+			if qlen > 0 {
+				r.sendQueueCard(chatID, sess)
+			} else {
+				r.sendText(chatID, "ℹ️ Tidak ada proses yang sedang aktif berjalan.")
+			}
 		}
 
 	case "/artifact", "/artifacts":
@@ -650,7 +756,7 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 			r.sendText(chatID, "Format: <code>/plan &lt;uraian tugas perencanaan&gt;</code>")
 			return
 		}
-		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+		r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 			UserID:         userID,
 			Prompt:         args,
 			CWD:            sess.CWD,
@@ -667,7 +773,7 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 			r.sendText(chatID, "Format: <code>/goal &lt;target autonomous task&gt;</code>")
 			return
 		}
-		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+		r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 			UserID:         userID,
 			Prompt:         "/goal " + args,
 			CWD:            sess.CWD,
@@ -773,8 +879,9 @@ func (r *Router) handleCommandWithIDs(msg *tgbotapi.Message, sess *session.UserS
 		}
 
 	default:
-		// Forward any other custom slash command or skill to the agent
-		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+		// Forward any other custom slash command or skill to the agent.
+		// Queue explicitly when busy so follow-ups are never silently dropped.
+		r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 			UserID:         userID,
 			Prompt:         text,
 			CWD:            sess.CWD,
@@ -809,18 +916,115 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		_, _ = r.bot.Request(delMsg)
 
 	case data == "cmd_cancel_active_task":
+		qlen := r.queueLength(userID)
 		if r.cancelActiveTask(userID, chatID) {
-			edit := tgbotapi.NewEditMessageText(chatID, msgID, "🛑 <b>Tugas aktif berhasil dihentikan.</b> Anda dapat mengirim instruksi baru sekarang.")
+			var text string
+			if qlen > 0 {
+				if sess.Language == "en" {
+					text = fmt.Sprintf("🛑 <b>Active task stopped.</b>\n⏭️ <i>%d queued message(s) kept and will auto-run next.</i>", qlen)
+				} else {
+					text = fmt.Sprintf("🛑 <b>Tugas aktif dihentikan.</b>\n⏭️ <i>%d pesan antrean tetap tersimpan dan akan jalan otomatis.</i>", qlen)
+				}
+			} else {
+				if sess.Language == "en" {
+					text = "🛑 <b>Active task stopped.</b> You can send a new instruction now."
+				} else {
+					text = "🛑 <b>Tugas aktif berhasil dihentikan.</b> Anda dapat mengirim instruksi baru sekarang."
+				}
+			}
+			edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
 			edit.ParseMode = "HTML"
-			kb := CloseOnlyKeyboard(sess.Language)
+			kb := QueueActionKeyboard(sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
+			// If the tapped message IS the live card, its content was just replaced —
+			// drop tracking so later refreshes don't overwrite this terminal state.
+			// Otherwise leave the card alone: the worker will flip it to the next
+			// queued item (or finalized stopped state) within moments.
+			r.busyMu.Lock()
+			if c, ok := r.busyCards[userID]; ok && c != nil && c.ChatID == chatID && c.MsgID == msgID {
+				delete(r.busyCards, userID)
+			}
+			r.busyMu.Unlock()
 		} else {
 			edit := tgbotapi.NewEditMessageText(chatID, msgID, "ℹ️ Tidak ada proses aktif yang sedang berjalan.")
 			edit.ParseMode = "HTML"
 			kb := CloseOnlyKeyboard(sess.Language)
 			edit.ReplyMarkup = &kb
 			_, _ = r.bot.Send(edit)
+		}
+
+	case data == "cmd_queue_menu":
+		items := r.listQueue(userID)
+		task := r.getActiveTask(userID)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatQueueList(sess.Language, task, items))
+		edit.ParseMode = "HTML"
+		kb := QueueActionKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+	case data == "cmd_clear_queue":
+		removed := r.clearQueue(userID)
+		var text string
+		if removed > 0 {
+			if sess.Language == "en" {
+				text = fmt.Sprintf("🧹 <b>Queue cleared:</b> %d pending message(s) dropped. Active task keeps running.", removed)
+			} else {
+				text = fmt.Sprintf("🧹 <b>Antrean dihapus:</b> %d pesan tertunda dibuang. Tugas aktif tetap berjalan.", removed)
+			}
+		} else {
+			if sess.Language == "en" {
+				text = "ℹ️ Queue is already empty — nothing to clear."
+			} else {
+				text = "ℹ️ Antrean sudah kosong — tidak ada yang dihapus."
+			}
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
+		edit.ParseMode = "HTML"
+		kb := QueueActionKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+
+		// Live card shows the queue without the dropped items from now on.
+		// Same-message case: the tapped "cleared" confirmation already IS the
+		// current content, so leave it — later ticks/worker events resume live view.
+		r.busyMu.Lock()
+		same := false
+		if c, ok := r.busyCards[userID]; ok && c != nil && c.ChatID == chatID && c.MsgID == msgID {
+			c.LastText = text
+			same = true
+		}
+		r.busyMu.Unlock()
+		if !same {
+			r.refreshBusyCard(userID)
+		}
+
+	case data == "cmd_cancel_all":
+		removed := r.clearQueue(userID)
+		stopped := r.cancelActiveTask(userID, chatID)
+		var text string
+		if sess.Language == "en" {
+			text = fmt.Sprintf("🛑 <b>Full stop:</b> active task stopped=%v, %d queued dropped. Queue is now empty.", stopped, removed)
+		} else {
+			text = fmt.Sprintf("🛑 <b>Berhenti total:</b> tugas aktif dihentikan=%v, %d antrean dibuang. Antrean kini kosong.", stopped, removed)
+		}
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, text)
+		edit.ParseMode = "HTML"
+		kb := CloseOnlyKeyboard(sess.Language)
+		edit.ReplyMarkup = &kb
+		_, _ = r.bot.Send(edit)
+		// Terminal state lives on the tapped message now. If the live card is a
+		// different message, flip it to stopped too; if it's the same one,
+		// just drop tracking so nothing overwrites this final text.
+		r.busyMu.Lock()
+		card, hasCard := r.busyCards[userID]
+		sameMsg := hasCard && card != nil && card.ChatID == chatID && card.MsgID == msgID
+		if sameMsg {
+			delete(r.busyCards, userID)
+		}
+		r.busyMu.Unlock()
+		if hasCard && !sameMsg {
+			r.finalizeBusyCard(userID, sess.Language, true)
 		}
 
 	case data == "cmd_help_menu":
@@ -933,7 +1137,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		artID := strings.TrimPrefix(data, "art_approve:")
 		r.sendText(chatID, fmt.Sprintf("✅ <b>Artifact Disetujui:</b> <code>%s</code>\n🚀 Melanjutkan eksekusi rencana...", artID))
 		prompt := fmt.Sprintf("Saya telah meninjau dan menyetujui artifact '%s'. Silakan lanjutkan ke langkah implementasi dan eksekusi selanjutnya secara bertahap.", artID)
-		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+		r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 			UserID:         userID,
 			Prompt:         prompt,
 			CWD:            sess.CWD,
@@ -947,7 +1151,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		artID := strings.TrimPrefix(data, "art_reject:")
 		r.sendText(chatID, fmt.Sprintf("❌ <b>Artifact Ditolak / Meminta Revisi:</b> <code>%s</code>\nSilakan berikan instruksi revisi atau agen akan meninjau ulang alternatif rencana ini.", artID))
 		prompt := fmt.Sprintf("Saya menolak artifact/rencana '%s'. Tolong tinjau kembali kekurangan rencana tersebut dan buat revisi alternatif yang lebih baik.", artID)
-		r.executeAgentTurn(chatID, sess, engine.StreamRunOptions{
+		r.tryEnqueueOrExecute(chatID, sess, engine.StreamRunOptions{
 			UserID:         userID,
 			Prompt:         prompt,
 			CWD:            sess.CWD,
@@ -1001,7 +1205,7 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		_, _ = r.bot.Send(edit)
 
 	case data == "cmd_usage":
-		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "📊 Model Quota & Limit", "/usage", "cmd_usage", sess.Language)
+		r.handleUsageInPlace(chatID, msgID, sess)
 
 	case data == "cmd_credits":
 		r.executeOneShotInPlace(chatID, msgID, sess.CWD, "💰 G1 Credits", "/credits", "cmd_credits", sess.Language)
@@ -1019,7 +1223,9 @@ func (r *Router) handleCallbackQuery(cb *tgbotapi.CallbackQuery) {
 		}
 		toast := tgbotapi.NewCallback(cb.ID, i18n.T(sess.Language, "status_refreshed"))
 		_, _ = r.bot.Request(toast)
-		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatStatus(sess.Language, sess, isRunning, taskDesc))
+		queueItems := r.listQueue(userID)
+		queueSection := FormatQueueSection(sess.Language, queueItems)
+		edit := tgbotapi.NewEditMessageText(chatID, msgID, FormatStatusWithQueue(sess.Language, sess, isRunning, taskDesc, queueSection))
 		edit.ParseMode = "HTML"
 		kb := StatusActionKeyboard(sess.Language)
 		edit.ReplyMarkup = &kb
@@ -1358,10 +1564,128 @@ func (r *Router) executeOneShotInPlace(chatID int64, messageID int, cwd string, 
 	_, _ = r.bot.Send(edit)
 }
 
-func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, userMsgIDs ...int) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+// fetchUsage runs `agy -p "/usage"` and classifies failures. Returns raw output
+// plus a parsed error card when the call failed (nil on success).
+func (r *Router) fetchUsage(cwd string) (string, *i18n.ParsedError) {
+	out, err := r.oneShot.Run(context.Background(), cwd, "/usage")
+	lowerOut := strings.ToLower(out)
+	if err != nil || strings.Contains(lowerOut, "eligibility check failed") || strings.Contains(lowerOut, "resource_exhausted") {
+		rawErr := out
+		if err != nil {
+			rawErr = err.Error()
+		}
+		pe := i18n.ParseError(rawErr)
+		return out, pe
+	}
+	return out, nil
+}
 
+func (r *Router) renderUsageBody(lang, out string) string {
+	if entries, ok := ParseUsageOutput(out); ok {
+		return FormatUsageCard(lang, entries, time.Now())
+	}
+	// Fallback: raw output in a code block when the shape is unexpected.
+	if strings.TrimSpace(out) == "" {
+		if lang == "en" {
+			return "(Empty output)"
+		}
+		return "(Output kosong)"
+	}
+	return FormatCodeBlock("📊 Model Quota & Limit", out)
+}
+
+// handleUsage renders the beautified /usage quota card (slash-command path).
+func (r *Router) handleUsage(chatID int64, sess *session.UserSession) {
+	lang := sess.Language
+	stopTyping := make(chan struct{})
+	go func() {
+		_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopTyping:
+				return
+			case <-ticker.C:
+				_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+			}
+		}
+	}()
+	defer close(stopTyping)
+
+	loadingText := "⏳ Menjalankan <code>/usage</code>..."
+	if lang == "en" {
+		loadingText = "⏳ Executing <code>/usage</code>..."
+	}
+	loadingMsg, err := r.bot.Send(tgbotapi.NewMessage(chatID, loadingText))
+	if err != nil {
+		return
+	}
+
+	out, perr := r.fetchUsage(sess.CWD)
+	if perr != nil {
+		errKb := ErrorActionKeyboard(perr.ExtractedURLs, perr.IsEligibility, perr.IsQuotaLimit, lang)
+		edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, i18n.FormatErrorCard(lang, perr))
+		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &errKb
+		_, _ = r.bot.Send(edit)
+		return
+	}
+
+	kb := RefreshAndBackKeyboard("cmd_usage", "cmd_help_menu", lang)
+	edit := tgbotapi.NewEditMessageText(chatID, loadingMsg.MessageID, r.renderUsageBody(lang, out))
+	edit.ParseMode = "HTML"
+	edit.ReplyMarkup = &kb
+	_, _ = r.bot.Send(edit)
+}
+
+// handleUsageInPlace renders the beautified /usage quota card into an existing
+// message (inline-button refresh path).
+func (r *Router) handleUsageInPlace(chatID int64, messageID int, sess *session.UserSession) {
+	lang := sess.Language
+	stopTyping := make(chan struct{})
+	go func() {
+		_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopTyping:
+				return
+			case <-ticker.C:
+				_, _ = r.bot.Send(tgbotapi.NewChatAction(chatID, tgbotapi.ChatTyping))
+			}
+		}
+	}()
+	defer close(stopTyping)
+
+	loadingText := "⏳ Menjalankan <code>/usage</code>..."
+	if lang == "en" {
+		loadingText = "⏳ Executing <code>/usage</code>..."
+	}
+	loadingEdit := tgbotapi.NewEditMessageText(chatID, messageID, loadingText)
+	loadingEdit.ParseMode = "HTML"
+	_, _ = r.bot.Send(loadingEdit)
+
+	out, perr := r.fetchUsage(sess.CWD)
+	if perr != nil {
+		errKb := ErrorActionKeyboard(perr.ExtractedURLs, perr.IsEligibility, perr.IsQuotaLimit, lang)
+		edit := tgbotapi.NewEditMessageText(chatID, messageID, i18n.FormatErrorCard(lang, perr))
+		edit.ParseMode = "HTML"
+		edit.ReplyMarkup = &errKb
+		_, _ = r.bot.Send(edit)
+		return
+	}
+
+	kb := RefreshAndBackKeyboard("cmd_usage", "cmd_help_menu", lang)
+	edit := tgbotapi.NewEditMessageText(chatID, messageID, r.renderUsageBody(lang, out))
+	edit.ParseMode = "HTML"
+	edit.ReplyMarkup = &kb
+	_, _ = r.bot.Send(edit)
+}
+
+func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts engine.StreamRunOptions, userMsgIDs ...int) {
+	r.ensureQueueInit()
 	if opts.PrintTimeout == "" {
 		opts.PrintTimeout = r.cfg.Agy.PrintTimeout
 	}
@@ -1369,8 +1693,16 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 		opts.PrintTimeout = "24h"
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	// Use closure so reassigned cancel funcs (after /cancel + auto-continue) are still released on exit.
+	defer func() { cancel() }()
+
 	r.registerActiveTask(opts.UserID, chatID, opts.Prompt, cancel, opts.IsGoal)
 	defer r.unregisterActiveTask(opts.UserID)
+
+	// Live busy card: ticks duration/positions while work is in flight.
+	stopBusyTicker := r.startBusyTicker(opts.UserID)
+	defer stopBusyTicker()
 
 	// Continuous typing action so user always sees "typing..." in chat header while agent works
 	stopTyping := make(chan struct{})
@@ -1389,6 +1721,94 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 		}
 	}()
 
+	curOpts := opts
+	curUserMsgIDs := append([]int(nil), userMsgIDs...)
+	curSess := sess
+	queueDone := 0
+
+	for {
+		// Keep the active-task card in sync with the item actually running.
+		r.taskMu.Lock()
+		if t, ok := r.activeTasks[curOpts.UserID]; ok && t != nil {
+			t.Prompt = curOpts.Prompt
+			// Only reset StartedAt for queued follow-ups, not the first turn.
+			if queueDone > 0 {
+				t.StartedAt = time.Now()
+			}
+			t.IsGoal = curOpts.IsGoal
+		}
+		r.taskMu.Unlock()
+
+		if queueDone > 0 {
+			// Dynamic transition: the same live card flips from "queued" to
+			// "now running" instead of staying stuck on the old waiting text.
+			remaining := r.queueLength(curOpts.UserID)
+			hl := runningHighlight(curSess.Language, truncatePreview(curOpts.Prompt, 140), remaining)
+			r.upsertBusyCard(chatID, curOpts.UserID, curSess.Language, hl)
+		}
+
+		r.runAgentGoalLoop(ctx, chatID, curSess, &curOpts, curUserMsgIDs)
+
+		if ctx.Err() != nil {
+			// Current turn was cancelled via /cancel. Start next queued item with a
+			// fresh context so cancellation only stops the current turn, not the whole queue.
+			// Re-register because cancelActiveTask deleted the map entry.
+			next := r.dequeueNext(curOpts.UserID)
+			if next == nil {
+				break
+			}
+			queueDone++
+			freshSess := r.sm.GetSession(next.UserID, next.ChatID)
+			next.ConversationID = freshSess.ActiveConversationID
+			if next.CWD == "" {
+				next.CWD = freshSess.CWD
+			}
+			if next.PermissionMode == "" {
+				next.PermissionMode = freshSess.PermissionMode
+			}
+			if next.PrintTimeout == "" {
+				next.PrintTimeout = r.cfg.Agy.PrintTimeout
+			}
+			nextCtx, nextCancel := context.WithCancel(context.Background())
+			defer nextCancel()
+			ctx = nextCtx
+			r.registerActiveTask(next.UserID, next.ChatID, next.Prompt, nextCancel, next.IsGoal)
+			curOpts = next.ToStreamOptions()
+			curUserMsgIDs = append([]int(nil), next.UserMsgIDs...)
+			curSess = freshSess
+			chatID = next.ChatID
+			continue
+		}
+
+		next := r.dequeueNext(curOpts.UserID)
+		if next == nil {
+			break
+		}
+		queueDone++
+		freshSess := r.sm.GetSession(next.UserID, next.ChatID)
+		next.ConversationID = freshSess.ActiveConversationID
+		if next.CWD == "" {
+			next.CWD = freshSess.CWD
+		}
+		if next.PermissionMode == "" {
+			next.PermissionMode = freshSess.PermissionMode
+		}
+		if next.PrintTimeout == "" {
+			next.PrintTimeout = r.cfg.Agy.PrintTimeout
+		}
+		curOpts = next.ToStreamOptions()
+		curUserMsgIDs = append([]int(nil), next.UserMsgIDs...)
+		curSess = freshSess
+		chatID = next.ChatID
+	}
+
+	// Terminal transition: flip the live card to finished/stopped instead of
+	// leaving the last "waiting/running" text frozen in chat.
+	r.finalizeBusyCard(curOpts.UserID, curSess.Language, ctx.Err() != nil)
+}
+
+// runAgentGoalLoop runs a single agent turn including the /goal multi-turn loop.
+func (r *Router) runAgentGoalLoop(ctx context.Context, chatID int64, sess *session.UserSession, opts *engine.StreamRunOptions, userMsgIDs []int) {
 	maxTurns := 1
 	if opts.IsGoal {
 		maxTurns = 15
@@ -1405,7 +1825,7 @@ func (r *Router) executeAgentTurn(chatID int64, sess *session.UserSession, opts 
 			turnUserMsgIDs = userMsgIDs
 		}
 
-		result, err := r.runSingleStreamTurn(ctx, chatID, sess, opts, iteration, turnUserMsgIDs)
+		result, err := r.runSingleStreamTurn(ctx, chatID, sess, *opts, iteration, turnUserMsgIDs)
 		if ctx.Err() != nil {
 			break
 		}

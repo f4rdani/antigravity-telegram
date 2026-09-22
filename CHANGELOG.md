@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.17] - 2026-09-21
+
+### Added & Improved
+- **Identifiable Media File Naming Format (`agy-bot-tt-bb-tahun_HHmmss`)**:
+  - Replaced ambiguous generic Unix timestamp naming (`photo_<timestamp>.jpg`) with human-readable, bot-identifiable timestamp naming:
+    - Photos: `agy-bot-DD-MM-YYYY_HHmmss.jpg` (e.g. `agy-bot-21-09-2026_191851.jpg`)
+    - Documents: `agy-bot-DD-MM-YYYY_HHmmss_<filename>` (or `agy-bot-DD-MM-YYYY_HHmmss.bin` if unlabelled)
+    - Video / Audio / Voice: prefixed with `agy-bot-DD-MM-YYYY_HHmmss_`
+  - Prevents filename collision and makes it immediately clear in workspace and uploads directory which bot received the media.
+
+## [1.0.16] - 2026-09-18
+
+### Reverted
+- **`/usage` back to bullet + progress-bar card (table experiment undone)**:
+  - Per user feedback the swipeable monospace table was harder to read; restored the grouped per-scope bullet layout with status dots, progress bars, WIB reset times and reset countdowns from v1.0.15.
+
+## [1.0.15] - 2026-09-18
+
+### Improved
+- **Beautified `/usage` quota card with reset countdowns**:
+  - Raw TSV output (`Weekly Limit Remaining 79% 2026-09-24T16:01:16Z`) is now parsed and rendered as a one-glance summary plus a monospace table inside `<pre>`, so Telegram clients let users swipe sideways when it overflows the screen.
+  - Table columns per scope row (♊ Gemini, Claude/GPT; 5-hour before weekly): remaining percent, reset countdown (`Reset dalam 6 hari 5 jam`, `segera (menunggu refresh)` when elapsed), and reset time in WIB — id/en localized.
+  - Card carries in-place Refresh + Back buttons on both slash and button paths; falls back to the raw code block if the CLI output shape ever changes.
+
+## [1.0.14] - 2026-09-18
+
+### Fixed
+- **Dynamic live busy card (queue status never looks frozen/stuck)**:
+  - One live card per user is now edited in place instead of stacking static "please wait" messages: elapsed duration ticks every 30s, queue positions shift as items start, and the header transitions `✅ masuk antrean #N` → `▶️ Prompt antrean berhasil dijalankan` → `✅ Semua tugas selesai` / `🛑 Tugas dihentikan` automatically, with a `🔄 Status live • diperbarui HH:MM:SS` footer proving freshness.
+  - `/clearqueue` and full-stop actions keep the card truthful (re-render or terminal state); tapping buttons on the card itself no longer gets overwritten by stale refreshes.
+  - Fixed `/cancel` with a pending queue: the worker now re-registers the next queued turn with a fresh context, so cancellation stops only the current turn and the queue keeps auto-running (previously the continued turn ran unregistered, risking duplicate concurrent runs).
+
+## [1.0.13] - 2026-09-18
+
+### Fixed
+- **Explicit FIFO message queue for long runs (no more ambiguous dropped messages)**:
+  - Previously, any message sent while a task was running was silently discarded with only a "please wait" warning, so follow-ups like "lalu bisa ga ini di-add ke gogate" were lost and users had to resend manually.
+  - Now every queueable prompt (plain text, `/plan`, `/goal`, `/continue`, unknown skill commands, media captions, artifact approve/reject) is either executed immediately when idle or explicitly enqueued with a position number (`✅ Pesan masuk antrean #N`) when busy — never silently dropped.
+  - Queue drains automatically in order in the same worker (active task stays registered during drain, so no duplicate concurrent `agy` processes). Each queued start announces `▶️ Menjalankan antrean #N`.
+  - New instant control commands: `/queue` (view FIFO card: active + pending) and `/clearqueue` (drop pending, keep active running). `/status` now always embeds the queue section. `/cancel` stops only the active turn and keeps the queue for auto-run; new `Hentikan Semua` button stops active + clears queue.
+  - Split long-message debounce still works while busy: messages flow through the accumulator first, then the queue decision happens on the merged text, so multi-part pastes become a single queue entry.
+  - Cap: max 10 pending per user, with explicit "queue full" notice instead of silent loss.
+
 ## [1.0.7] - 2026-09-16
 
 ### Added & Improved

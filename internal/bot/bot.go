@@ -61,6 +61,8 @@ func NewBotServer(cfg *config.Config, sm *session.SessionManager) (*BotServer, e
 		{Command: "new", Description: "Mulai sesi percakapan baru"},
 		{Command: "permission", Description: "Atur mode persetujuan tools"},
 		{Command: "cancel", Description: "Hentikan proses yang berjalan"},
+		{Command: "queue", Description: "Lihat antrean pesan FIFO"},
+		{Command: "clearqueue", Description: "Hapus semua antrean tertunda"},
 		{Command: "file", Description: "Unduh file dari server ke Telegram"},
 		{Command: "artifact", Description: "Buka, unduh, approve/reject artifact & plan"},
 		{Command: "autodelete", Description: "Atur batas auto-delete pesan chat"},

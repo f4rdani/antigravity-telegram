@@ -87,8 +87,15 @@ func (r *StreamAgentRunner) RunStream(ctx context.Context, opts StreamRunOptions
 		args = append(args, "--model", opts.Model)
 	}
 
-	if opts.Effort != "" {
-		args = append(args, "--effort", opts.Effort)
+	// Only pass --effort for models that support it (Gemini). Claude and other
+	// models do not accept --effort and will error. If the model supports effort
+	// and no effort is explicitly set, default to "high" for best performance.
+	if modelSupportsEffort(opts.Model) {
+		effort := opts.Effort
+		if effort == "" {
+			effort = "high"
+		}
+		args = append(args, "--effort", effort)
 	}
 
 	cmd := exec.CommandContext(ctx, r.binaryPath, args...)
@@ -227,4 +234,31 @@ func (r *StreamAgentRunner) RunStream(ctx context.Context, opts StreamRunOptions
 	}
 
 	return finalResult, nil
+}
+
+// modelSupportsEffort returns true if the given model supports the --effort flag.
+// Currently only Gemini models support --effort; Claude and other models will
+// error if --effort is passed. An empty model string means the agy default model
+// is used — to be safe, we check the default model via agy itself, but since we
+// cannot know the resolved default at build time, we treat an empty string as
+// supporting effort only if the user has not overridden the model (common case is
+// Gemini default). We detect "gemini" in the model name as the indicator.
+// If the model name contains "claude" or "gpt" (or other non-Gemini providers),
+// we skip --effort entirely.
+func modelSupportsEffort(model string) bool {
+	if model == "" {
+		// No explicit model set: agy will use its configured default.
+		// We cannot know the default here, so we conservatively return true
+		// (effort will be passed) and rely on the fact that if the default is
+		// Gemini this works, and if it's something else the user should set the
+		// model explicitly. In practice the default is always Gemini.
+		return true
+	}
+	lower := strings.ToLower(model)
+	// Claude and OpenAI models do not support --effort
+	if strings.Contains(lower, "claude") || strings.Contains(lower, "gpt") || strings.Contains(lower, "openai") {
+		return false
+	}
+	// Gemini models explicitly support --effort
+	return true
 }

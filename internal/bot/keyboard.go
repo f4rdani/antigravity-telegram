@@ -53,7 +53,30 @@ func StatusActionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_refresh"), "cmd_status"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_view_queue"), "cmd_queue_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_clear_queue"), "cmd_clear_queue"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_back_menu"), "cmd_help_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
+		),
+	)
+}
+
+// QueueActionKeyboard is shown on queue confirmations and /queue cards.
+// It makes the FIFO state explicit: view, clear, stop active, or stop everything.
+func QueueActionKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
+	return tgbotapi.NewInlineKeyboardMarkup(
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_view_queue"), "cmd_queue_menu"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_status"), "cmd_status"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_clear_queue"), "cmd_clear_queue"),
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_cancel_task"), "cmd_cancel_active_task"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_cancel_all"), "cmd_cancel_all"),
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)
@@ -334,9 +357,11 @@ func ArtifactDetailKeyboard(item artifact.Item, lang string) tgbotapi.InlineKeyb
 func ActiveTaskKeyboard(lang string) tgbotapi.InlineKeyboardMarkup {
 	return tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_view_queue"), "cmd_queue_menu"),
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_cancel_task"), "cmd_cancel_active_task"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_clear_queue"), "cmd_clear_queue"),
 			tgbotapi.NewInlineKeyboardButtonData(i18n.T(lang, "btn_close"), "cmd_delete_msg"),
 		),
 	)

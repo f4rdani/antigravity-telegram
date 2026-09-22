@@ -81,13 +81,13 @@ func IsInstantCommand(text string) bool {
 	cmd := strings.ToLower(parts[0])
 
 	switch cmd {
-	case "/cancel", "/stop", "/status", "/start", "/help",
-		"/model", "/effort", "/perm", "/cwd", "/ls", "/clear",
-		"/sessions", "/resume", "/new", "/lang", "/usage",
+	case "/cancel", "/stop", "/status", "/queue", "/clearqueue", "/queuelist", "/start", "/help",
+		"/model", "/effort", "/perm", "/permission", "/cwd", "/ls", "/pwd", "/clear",
+		"/sessions", "/resume", "/switch", "/new", "/lang", "/language", "/usage",
 		"/quota", "/credits", "/skills", "/agents", "/changelog",
-		"/artifact", "/artifacts",
+		"/artifact", "/artifacts", "/file", "/autodelete",
 		"/signout", "/logout", "/signin", "/login",
-		"/accounts", "/switch", "/whoami", "/code":
+		"/accounts", "/account", "/whoami", "/code":
 		return len(trimmed) < 1000
 	}
 	return false
