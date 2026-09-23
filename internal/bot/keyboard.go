@@ -485,4 +485,3 @@ func ErrorActionKeyboard(urls []string, isEligibility bool, isQuota bool, lang s
 
 	return tgbotapi.NewInlineKeyboardMarkup(rows...)
 }
-

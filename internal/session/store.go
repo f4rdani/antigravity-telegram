@@ -282,4 +282,3 @@ func (sm *SessionManager) ClearAllTrackedTurns(userID int64) []TurnMessageEntry 
 	go func() { _ = sm.SaveAll() }()
 	return all
 }
-

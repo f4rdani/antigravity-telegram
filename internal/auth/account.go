@@ -15,7 +15,7 @@ import (
 )
 
 var (
-	ErrNotLoggedIn   = errors.New("tidak ada akun yang sedang aktif")
+	ErrNotLoggedIn    = errors.New("tidak ada akun yang sedang aktif")
 	ErrNoSavedAccount = errors.New("akun tidak ditemukan di daftar tersimpan")
 )
 

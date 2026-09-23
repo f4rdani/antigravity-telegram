@@ -2634,4 +2634,3 @@ func (r *Router) handleWhoami(chatID int64, sess *session.UserSession) {
 	reply.ReplyMarkup = &kb
 	_, _ = r.bot.Send(reply)
 }
-

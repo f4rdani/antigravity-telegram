@@ -33,7 +33,7 @@ type ToolInfoPayload struct {
 type StepUpdatePayload struct {
 	ConversationID  string           `json:"conversation_id"`
 	StepIndex       int              `json:"step_index"`
-	State           string           `json:"state"` // "ACTIVE", "DONE"
+	State           string           `json:"state"`     // "ACTIVE", "DONE"
 	StepType        string           `json:"step_type"` // "user_input", "agent_response", "system_message", "tool"
 	ToolName        string           `json:"tool_name,omitempty"`
 	ToolInfo        *ToolInfoPayload `json:"tool_info,omitempty"`
