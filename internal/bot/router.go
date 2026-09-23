@@ -1787,6 +1787,16 @@ func (r *Router) handleUsage(chatID int64, sess *session.UserSession) {
 	}
 
 	kb := RefreshAndBackKeyboard("cmd_usage", "cmd_help_menu", lang)
+	// Rich first: native table + headings. sendRichOrHTML already falls back
+	// to legacy HTML internally, so any nonzero id means the card is shown.
+	if r.richEnabled() {
+		if entries, ok := ParseUsageOutput(out); ok {
+			rich := FormatUsageRichCard(lang, entries, time.Now(), activeAcc)
+			if id, _ := r.sendRichOrHTML(chatID, rich, &kb); id != 0 {
+				return
+			}
+		}
+	}
 	msg := tgbotapi.NewMessage(chatID, r.renderUsageBody(lang, out, activeAcc))
 	msg.ParseMode = "HTML"
 	msg.ReplyMarkup = &kb
@@ -1848,6 +1858,16 @@ func (r *Router) handleUsageInPlace(chatID int64, messageID int, sess *session.U
 	}
 
 	kb := RefreshAndBackKeyboard("cmd_usage", "cmd_help_menu", lang)
+	// Rich first: native table + headings. editRichOrHTML already falls back
+	// to legacy HTML internally, so a true return means the card is shown.
+	if r.richEnabled() {
+		if entries, ok := ParseUsageOutput(out); ok {
+			rich := FormatUsageRichCard(lang, entries, time.Now(), activeAcc)
+			if r.editRichOrHTML(chatID, messageID, rich, &kb) {
+				return
+			}
+		}
+	}
 	edit := tgbotapi.NewEditMessageText(chatID, messageID, r.renderUsageBody(lang, out, activeAcc))
 	edit.ParseMode = "HTML"
 	edit.ReplyMarkup = &kb
@@ -2152,6 +2172,9 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 
 	footer := ""
 	finalText := ""
+	// finalIsMarkdown marks raw agent markdown eligible for the native Rich
+	// path. HTML error cards and pre-built status strings must stay legacy.
+	finalIsMarkdown := false
 	var errorDetails *i18n.ParsedError
 	var actionKb *tgbotapi.InlineKeyboardMarkup
 
@@ -2200,6 +2223,7 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 			// Successful response: do not append transient step retry errors
 			footer = FormatResultFooter(result)
 			finalText = result.Response
+			finalIsMarkdown = true
 			if result.ConversationID != "" {
 				lastConvID = result.ConversationID
 				r.sm.UpdateConversation(opts.UserID, lastConvID, "")
@@ -2217,8 +2241,19 @@ func (r *Router) runSingleStreamTurn(ctx context.Context, chatID int64, sess *se
 	var finalBotMsgID int
 	if started && savedBuffer != nil {
 		activityTracker.Delete()
-		savedBuffer.FinalizeWithKeyboard(finalText, footer, actions, actionKb)
-		finalBotMsgID = savedBuffer.MessageID()
+		// Rich first for raw agent markdown: native tables, headings, task
+		// lists. Falls back to the legacy HTML finalize inside the helpers.
+		if finalIsMarkdown && r.richEnabled() && renderer.ShouldUseRich(finalText) {
+			if id := r.finalizeRich(chatID, savedBuffer, finalText, footer, actions, actionKb); id != 0 {
+				finalBotMsgID = id
+			} else {
+				savedBuffer.FinalizeWithKeyboard(finalText, footer, actions, actionKb)
+				finalBotMsgID = savedBuffer.MessageID()
+			}
+		} else {
+			savedBuffer.FinalizeWithKeyboard(finalText, footer, actions, actionKb)
+			finalBotMsgID = savedBuffer.MessageID()
+		}
 	} else {
 		text := finalText
 		if text == "" {

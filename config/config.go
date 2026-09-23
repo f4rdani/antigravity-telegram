@@ -15,6 +15,13 @@ type TelegramConfig struct {
 	BotToken             string  `json:"bot_token"`
 	AllowedUserIDs       []int64 `json:"allowed_user_ids"`
 	StreamEditIntervalMs int     `json:"stream_edit_interval_ms"`
+	// RichMessages enables native Telegram Rich Messages (Bot API 10.1+
+	// sendRichMessage with Rich Markdown) for final answers that benefit
+	// from it: tables, headings, task lists, <details>, math. Streaming
+	// edits stay on the legacy HTML path; only the final message is
+	// upgraded. Any rejection transparently falls back to HTML.
+	// Env override: AGY_RICH_MESSAGES=0|false to disable.
+	RichMessages bool `json:"rich_messages"`
 }
 
 type AgyConfig struct {
@@ -53,6 +60,7 @@ func DefaultConfig() *Config {
 			BotToken:             "",
 			AllowedUserIDs:       []int64{},
 			StreamEditIntervalMs: 1200,
+			RichMessages:         true,
 		},
 		Agy: AgyConfig{
 			BinaryPath:       "agy",
@@ -127,6 +135,14 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Defaults fallback
 	if cfg.Telegram.StreamEditIntervalMs <= 0 {
 		cfg.Telegram.StreamEditIntervalMs = 1200
+	}
+	if v := os.Getenv("AGY_RICH_MESSAGES"); v != "" {
+		lv := strings.ToLower(strings.TrimSpace(v))
+		if lv == "0" || lv == "false" || lv == "no" || lv == "off" {
+			cfg.Telegram.RichMessages = false
+		} else if lv == "1" || lv == "true" || lv == "yes" || lv == "on" {
+			cfg.Telegram.RichMessages = true
+		}
 	}
 	if cfg.Agy.PermissionMode != "ask" {
 		cfg.Agy.PermissionMode = "auto"

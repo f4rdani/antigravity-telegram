@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"agy-tele/internal/auth"
+	"agy-tele/internal/renderer"
 )
 
 // wibZone is UTC+7 for user-facing reset times.
@@ -128,6 +129,95 @@ func usageMonthName(t time.Time, lang string) string {
 		return enMonths[m]
 	}
 	return idMonths[m]
+}
+
+// FormatUsageRichCard renders the /usage quota card as Rich Markdown
+// (Telegram Bot API 10.1 Rich Markdown style) so limits arrive as a native
+// table with headings instead of monospace text.
+func FormatUsageRichCard(lang string, entries []UsageEntry, now time.Time, acc ...*auth.AccountInfo) string {
+	isEN := lang == "en"
+	var sb strings.Builder
+	if isEN {
+		sb.WriteString("# 📊 Antigravity Model Quota\n\n")
+		if len(acc) > 0 && acc[0] != nil && acc[0].Email != "" {
+			tier := acc[0].Tier
+			if tier == "" {
+				tier = "Free"
+			}
+			sb.WriteString(fmt.Sprintf("👤 **Account:** `%s`\n", acc[0].Email))
+			sb.WriteString(fmt.Sprintf("%s **Plan:** %s\n", auth.TierIcon(tier), tier))
+		}
+		sb.WriteString(fmt.Sprintf("_Updated %s_\n", formatWIB(now, lang)))
+	} else {
+		sb.WriteString("# 📊 Kuota Model Antigravity\n\n")
+		if len(acc) > 0 && acc[0] != nil && acc[0].Email != "" {
+			tier := acc[0].Tier
+			if tier == "" {
+				tier = "Free"
+			}
+			sb.WriteString(fmt.Sprintf("👤 **Akun:** `%s`\n", acc[0].Email))
+			sb.WriteString(fmt.Sprintf("%s **Langganan:** %s\n", auth.TierIcon(tier), tier))
+		}
+		sb.WriteString(fmt.Sprintf("_Diperbarui %s_\n", formatWIB(now, lang)))
+	}
+	// Group by scope (first-seen order), five-hour row before weekly row.
+	type group struct {
+		scope string
+		rows  []UsageEntry
+	}
+	var order []string
+	groups := map[string]*group{}
+	for _, e := range entries {
+		g, ok := groups[e.Scope]
+		if !ok {
+			g = &group{scope: e.Scope}
+			groups[e.Scope] = g
+			order = append(order, e.Scope)
+		}
+		g.rows = append(g.rows, e)
+	}
+	fiveFirst := func(rows []UsageEntry) {
+		for i := 0; i < len(rows); i++ {
+			for j := i + 1; j < len(rows); j++ {
+				iw := strings.Contains(strings.ToLower(rows[i].Kind), "weekly")
+				jw := strings.Contains(strings.ToLower(rows[j].Kind), "weekly")
+				if iw && !jw {
+					rows[i], rows[j] = rows[j], rows[i]
+				}
+			}
+		}
+	}
+	plainScope := func(scope string) string {
+		s := usageScopeLabel(scope, lang)
+		// usageScopeLabel returns HTML-escaped text with emoji prefix; strip tags for rich.
+		return strings.TrimSpace(renderer.StripHTML(s))
+	}
+	plainKind := func(kind string) string {
+		return strings.TrimSpace(renderer.StripHTML(usageKindLabel(kind, lang)))
+	}
+	for _, key := range order {
+		g := groups[key]
+		fiveFirst(g.rows)
+		sb.WriteString(fmt.Sprintf("\n## %s\n\n", plainScope(g.scope)))
+		if isEN {
+			sb.WriteString("| Limit | Left | Resets in |\n| --- | ---: | --- |\n")
+		} else {
+			sb.WriteString("| Limit | Sisa | Reset dalam |\n| --- | ---: | --- |\n")
+		}
+		for _, r := range g.rows {
+			reset := "-"
+			if r.ResetGiven {
+				reset = fmt.Sprintf("%s • %s", formatCountdown(lang, r.Reset.Sub(now)), formatWIB(r.Reset, lang))
+			}
+			sb.WriteString(fmt.Sprintf("| %s | **%d%%** | %s |\n", plainKind(r.Kind), r.Percent, reset))
+		}
+	}
+	if isEN {
+		sb.WriteString("\n_5-hour limits refill every 5 hours, weekly ones every 7 days. When one scope runs low, switch to the other._\n")
+	} else {
+		sb.WriteString("\n_Limit 5-jam terisi ulang tiap 5 jam, mingguan tiap 7 hari. Kalau satu scope menipis, pindah ke scope lain._\n")
+	}
+	return sb.String()
 }
 
 // formatWIB renders "24 Sep 2026, 23:01 WIB".

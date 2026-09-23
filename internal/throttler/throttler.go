@@ -20,6 +20,7 @@ type MessageThrottler struct {
 	statusText    string
 	hasTextDelta  bool
 	dirty         bool
+	stopped       bool
 	interval      time.Duration
 	stopCh        chan struct{}
 	doneCh        chan struct{}
@@ -140,7 +141,12 @@ func splitIntoChunks(text string, chunkSize int) []string {
 }
 
 func (t *MessageThrottler) Stop() string {
-	close(t.stopCh)
+	t.mu.Lock()
+	if !t.stopped {
+		t.stopped = true
+		close(t.stopCh)
+	}
+	t.mu.Unlock()
 	<-t.doneCh
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -237,4 +243,3 @@ func (t *MessageThrottler) MessageID() int {
 	defer t.mu.Unlock()
 	return t.activeMessage
 }
-
